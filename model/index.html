@@ -193,11 +193,11 @@
     box-shadow:inset 0 1px 2px rgba(0,0,0,.15)}
   .sheet h3{font-family:"Teko",sans-serif;text-transform:uppercase;letter-spacing:.08em;
     font-weight:500;font-size:1.15rem;color:var(--muted);margin:.1rem 0 .6rem}
-  .parts{display:flex;gap:.35rem;margin-bottom:.7rem}
-  .parts button{flex:1;font-family:"Teko",sans-serif;text-transform:uppercase;letter-spacing:.05em;
+  .parts,.fabricRow{display:flex;gap:.35rem;margin-bottom:.7rem}
+  .parts button,.fabricRow .fab{flex:1;font-family:"Teko",sans-serif;text-transform:uppercase;letter-spacing:.05em;
     font-size:1.05rem;padding:.45rem;border:1px solid var(--line);border-radius:9px;background:transparent;
     color:var(--muted);cursor:pointer}
-  .parts button.on{background:var(--forest);color:#fff;border-color:var(--forest)}
+  .parts button.on,.fabricRow .fab.on{background:var(--forest);color:#fff;border-color:var(--forest)}
   .swatches{display:flex;flex-wrap:wrap;gap:.55rem;justify-content:flex-start}
   .sw{width:34px;height:34px;border-radius:50%;border:2px solid rgba(0,0,0,.12);cursor:pointer;position:relative;transition:transform .1s}
   .sw:active{transform:scale(.9)}
@@ -310,6 +310,7 @@
   <div class="sheet" id="sheet">
     <div class="sheetHandle" id="sheetGrip"><span class="grip"></span></div>
     <div class="sheetTitleRow"><h3 id="sheetTitle">Garment color</h3><span class="curColor" id="curColor"></span></div>
+    <div class="fabricRow" id="fabricRow"><button class="fab on" data-fab="Cotton">Cotton</button><button class="fab" data-fab="Polyester">Polyester</button></div>
     <div class="parts" id="parts" style="display:none"></div>
     <div class="swatches" id="swatches"></div>
     <div class="fieldwrap">
@@ -3449,7 +3450,7 @@ three/build/three.module.js:
   renderer.setSize(window.innerWidth,window.innerHeight);
   renderer.outputEncoding=THREE.sRGBEncoding;
   renderer.toneMapping=THREE.LinearToneMapping;
-  renderer.toneMappingExposure=0.95;
+  renderer.toneMappingExposure=1.0;
   renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
   $("#stage").appendChild(renderer.domElement);
 
@@ -3479,10 +3480,10 @@ three/build/three.module.js:
     scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture;
   }catch(e){ scene.environment=null; }   // some Safari/WebGL1 setups choke on PMREM; lighting still works without it
   // soft, even light: low key (no hot white wash on pale fabrics) + gentle fill/hemi so colors read true
-  var key=new THREE.DirectionalLight(0xffffff,0.40); key.position.set(2,2.6,2.4); scene.add(key);
-  var fill=new THREE.DirectionalLight(0xffffff,0.30); fill.position.set(-2.4,0.6,1.8); scene.add(fill);
-  var rim=new THREE.DirectionalLight(0xffffff,0.40); rim.position.set(-1.2,1.8,-2.6); scene.add(rim);
-  scene.add(new THREE.HemisphereLight(0xfbfaf6,0xb7af9d,0.54));
+  var key=new THREE.DirectionalLight(0xffffff,0.82); key.position.set(2,2.6,2.4); scene.add(key);
+  var fill=new THREE.DirectionalLight(0xffffff,0.10); fill.position.set(-2.4,0.6,1.8); scene.add(fill);
+  var rim=new THREE.DirectionalLight(0xffffff,0.14); rim.position.set(-1.2,1.8,-2.6); scene.add(rim);
+  scene.add(new THREE.HemisphereLight(0xffffff,0xeae8e1,0.15));
 
   var modelGroup=new THREE.Group(); scene.add(modelGroup); // yaw lives here
   var shadow=null;
@@ -3656,7 +3657,7 @@ three/build/three.module.js:
           meshes.push(o);
           var mats=Array.isArray(o.material)?o.material:[o.material];
           mats.forEach(function(m){
-            m.metalness=0.0; m.roughness=Math.min(0.98,Math.max(0.90,m.roughness||0.92)); m.envMapIntensity=0.13;
+            m.metalness=0.0; m.roughness=Math.min(0.98,Math.max(0.90,m.roughness||0.92)); m.envMapIntensity=0.05;
             if(m.map){ m.map.anisotropy=8; }
             var tinted=false;
             if(!MODELS[type].toneMap){
@@ -3752,11 +3753,27 @@ three/build/three.module.js:
     setTimeout(function(){ if(l.parentNode) l.parentNode.removeChild(l); },650); }
 
   // ---------- color ----------
+  var fabric='Cotton';
+  var basePartHex={};
+  function fabricParams(){ return fabric==='Polyester'
+    ? {rough:0.52, env:0.14, satMul:1.6, satAdd:0.10}
+    : {rough:0.90, env:0.05, satMul:1.35, satAdd:0.05}; }
   function setPartColor(partKey,hex){
     if(!current) return;
+    basePartHex[partKey]=hex;
     if(MODELS[current.type].toneMap){ recolorTone(parseInt((partKey||"tone0").replace("tone",""),10)||0, hex); return; }
+    var fp=fabricParams();
     var c=new THREE.Color(hex);
-    (current.partMats[partKey]||[]).forEach(function(m){ m.color.copy(c) });
+    { var hsl={}; c.getHSL(hsl); hsl.s=Math.min(1, hsl.s*fp.satMul+fp.satAdd); if(hsl.l<0.55) hsl.l=hsl.l*(0.78+hsl.l*0.38); c.setHSL(hsl.h,hsl.s,hsl.l); }
+    (current.partMats[partKey]||[]).forEach(function(mm){ mm.color.copy(c); mm.roughness=fp.rough; mm.metalness=0.0; mm.envMapIntensity=fp.env; mm.needsUpdate=true; });
+  }
+  function applyFabric(){
+    if(!current || MODELS[current.type].toneMap) return;
+    Object.keys(current.partMats).forEach(function(k){
+      var base=basePartHex[k];
+      if(base==null){ var mats=current.partMats[k]; base=(mats&&mats[0])?("#"+mats[0].color.getHexString()):null; }
+      if(base!=null) setPartColor(k, base);
+    });
   }
 
   // ---------- design placement ----------
@@ -4177,13 +4194,14 @@ three/build/three.module.js:
   });
 
   // ---------- UI: color sheet ----------
-  var PALETTE=[["#FFFFFF","White"],["#F4F1E8","Natural"],["#D6D6D4","Light grey"],["#9AA0A6","Sport grey"],
-    ["#6E7174","Grey"],["#46474B","Charcoal"],["#202024","Black"],
-    ["#1F4D3E","Forest"],["#26415E","Navy"],["#7A2D2D","Maroon"],["#20457C","Royal"],["#C8B89A","Sand"],
-    ["#3E6B57","Kelly"],["#8C6A3F","Khaki"],["#B23A48","Red"],["#6C7BA6","Sky"]];
+  var PALETTE=[["#141414","Black"],["#77797c","Grey"],["#c7cac9","Light Grey"],["#f4f4f2","White"],
+    ["#552a80","Purple"],["#1e2f4d","Navy Blue"],["#274ba0","Royal"],["#9ec7e8","Powder Blue"],
+    ["#123f2d","Dark Green"],["#2f8f4e","Green"],["#f0b81c","Yellow"],["#cf4e1c","Orange"],
+    ["#b52a2d","Red"],["#6e2822","Maroon"],["#e79bb6","Pink"]];
 
   function buildSheet(type){
     var cfg=MODELS[type], pwrap=$("#parts");
+    var fr=$("#fabricRow"); if(fr) fr.style.display=(cfg.toneMap?"none":"flex");
     if(cfg.parts.length>1){
       pwrap.style.display="flex"; pwrap.innerHTML="";
       cfg.parts.forEach(function(p,i){
@@ -4247,6 +4265,17 @@ three/build/three.module.js:
       b.dataset.hex=c[0]; b.title=c[1];
       b.addEventListener("click",function(){ setPartColor(activePart,c[0]); markSwatch(c[0]); updateCurColor(); syncCrossToColor(); });
       w.appendChild(b);
+    });
+  })();
+
+  (function(){
+    var fr=document.getElementById("fabricRow"); if(!fr) return;
+    fr.querySelectorAll(".fab").forEach(function(b){
+      b.addEventListener("click",function(){
+        fr.querySelectorAll(".fab").forEach(function(x){x.classList.remove("on")});
+        b.classList.add("on"); fabric=b.dataset.fab; applyFabric();
+        markSwatch(currentPartColor()); updateCurColor();
+      });
     });
   })();
 
