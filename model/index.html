@@ -3756,16 +3756,21 @@ three/build/three.module.js:
   var fabric='Cotton';
   var basePartHex={};
   function fabricParams(){ return fabric==='Polyester'
-    ? {rough:0.52, env:0.14, satMul:1.6, satAdd:0.10}
-    : {rough:0.90, env:0.05, satMul:1.35, satAdd:0.05}; }
+    ? {rough:0.58, env:0.04, satMul:1.9,  satAdd:0.12, roughDk:0.20, envDk:0.025}
+    : {rough:0.90, env:0.04, satMul:1.65, satAdd:0.08, roughDk:0.05, envDk:0.015}; }
   function setPartColor(partKey,hex){
     if(!current) return;
     basePartHex[partKey]=hex;
     if(MODELS[current.type].toneMap){ recolorTone(parseInt((partKey||"tone0").replace("tone",""),10)||0, hex); return; }
     var fp=fabricParams();
     var c=new THREE.Color(hex);
-    { var hsl={}; c.getHSL(hsl); hsl.s=Math.min(1, hsl.s*fp.satMul+fp.satAdd); if(hsl.l<0.55) hsl.l=hsl.l*(0.78+hsl.l*0.38); c.setHSL(hsl.h,hsl.s,hsl.l); }
-    (current.partMats[partKey]||[]).forEach(function(mm){ mm.color.copy(c); mm.roughness=fp.rough; mm.metalness=0.0; mm.envMapIntensity=fp.env; mm.needsUpdate=true; });
+    var hsl={}; c.getHSL(hsl);
+    hsl.s=Math.min(1, hsl.s*fp.satMul+fp.satAdd);
+    if(hsl.l<0.55)      hsl.l=hsl.l*(0.76+hsl.l*0.36);
+    else if(hsl.l<0.85) hsl.l=hsl.l*0.95;
+    c.setHSL(hsl.h,hsl.s,hsl.l);
+    var dk=Math.max(0, Math.min(1, (0.38-hsl.l)/0.38));
+    (current.partMats[partKey]||[]).forEach(function(mm){ mm.color.copy(c); mm.metalness=0.0; mm.roughness=fp.rough+dk*fp.roughDk; mm.envMapIntensity=fp.env-dk*fp.envDk; mm.needsUpdate=true; });
   }
   function applyFabric(){
     if(!current || MODELS[current.type].toneMap) return;
@@ -4195,7 +4200,7 @@ three/build/three.module.js:
 
   // ---------- UI: color sheet ----------
   var PALETTE=[["#141414","Black"],["#77797c","Grey"],["#c7cac9","Light Grey"],["#f4f4f2","White"],
-    ["#552a80","Purple"],["#1e2f4d","Navy Blue"],["#274ba0","Royal"],["#9ec7e8","Powder Blue"],
+    ["#552a80","Purple"],["#172a55","Navy Blue"],["#274ba0","Royal"],["#9ec7e8","Powder Blue"],
     ["#123f2d","Dark Green"],["#2f8f4e","Green"],["#f0b81c","Yellow"],["#cf4e1c","Orange"],
     ["#b52a2d","Red"],["#6e2822","Maroon"],["#5b3a29","Brown"],["#b39a6d","Khaki"],["#e79bb6","Pink"]];
 
