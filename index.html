@@ -1818,7 +1818,7 @@
     state.folders=state.folders.filter(function(f){return ids.indexOf(f.id)&lt;0;});
   }
 
-  var MOCKUP_URL = (function(){ try{ return window.top.location.origin + &quot;/model/&quot;; }catch(e){ return &quot;https://tools.brochcustom.com/model/&quot;; } })();
+  var MOCKUP_URL = (function(){ try{ return window.top.location.origin + &quot;/model.html&quot;; }catch(e){ return &quot;https://tools.brochcustom.com/model.html&quot;; } })();
 
   function sendToMockup(dataURL){
     if(!dataURL){ toast(&quot;No image to preview&quot;); return; }
@@ -2192,7 +2192,7 @@ function _dstNext(){
 
   <section id="tab-mockup" class="tab-panel">
     <div class="mockup-frame-wrap">
-      <iframe id="mockupFrame" class="mockup-frame" title="3D Mockup" loading="lazy" data-src="model/"></iframe>
+      <iframe id="mockupFrame" class="mockup-frame" title="3D Mockup" loading="lazy" data-src="model.html"></iframe>
     </div>
   </section>
 
