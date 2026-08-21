@@ -519,15 +519,50 @@
     letter-spacing: 0.04em;
   }
 
-  .font-previews-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    margin-bottom: 12px;
-    flex-wrap: wrap;
+  .font-controls-head {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:14px;
+    padding-bottom:2px;
   }
-  .font-previews-head .overline { margin-bottom: 0; }
+  /* Small Schadow brand moment; controls/supporting UI stay Teko. */
+  .font-tools-title {
+    font-family:'Schadow','Teko',sans-serif;
+    font-size:24px;
+    font-weight:900;
+    letter-spacing:.035em;
+    line-height:1;
+    text-transform:uppercase;
+    color:var(--green);
+  }
+  .font-previews-head {
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:14px;
+    margin-bottom:12px;
+    flex-wrap:wrap;
+  }
+  /* Font view filter: compatibility is a filter, never a badge on font cards. */
+  .font-filter-btn {
+    flex: 0 0 auto;
+    font-family: 'Teko', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: .10em;
+    text-transform: uppercase;
+    color: var(--green);
+    background: transparent;
+    border: 1px solid rgba(31,77,62,.42);
+    border-radius: 999px;
+    padding: 6px 13px 5px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
+  }
+  .font-filter-btn:hover { border-color: var(--green); background: rgba(31,77,62,.06); }
+  .font-filter-btn.active { background: var(--green); border-color: var(--green); color: var(--cream); }
   .font-previews {
     display: flex;
     flex-direction: column;
@@ -960,6 +995,24 @@
   }
   .admin-font-cat:focus { outline: none; border-color: var(--green); }
 
+  .admin-font-leftchest {
+    flex-shrink: 0;
+    font-family: 'Teko', sans-serif;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--green);
+    background: transparent;
+    border: 1px solid rgba(31,77,62,.35);
+    border-radius: 999px;
+    padding: 6px 10px 5px;
+    cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
+    white-space: nowrap;
+  }
+  .admin-font-leftchest:hover { border-color: var(--green); background: rgba(31,77,62,.06); }
+  .admin-font-leftchest.on { background: var(--green); border-color: var(--green); color: var(--cream); }
+
   .admin-empty {
     text-align: center;
     padding: 18px;
@@ -1063,6 +1116,10 @@
   <!-- ===== FONT PREVIEW ===== -->
   <section id="tab-fonts" class="tab-panel">
     <div class="font-controls">
+      <div class="font-controls-head">
+        <span class="font-tools-title">Fonts</span>
+        <button class="font-filter-btn" id="leftChestFilter" type="button" aria-pressed="false">Left Chest</button>
+      </div>
       <div class="font-row">
         <label class="font-label" for="fontTextInput">Type your text</label>
         <input type="text" id="fontTextInput" class="font-text-input" placeholder="Your name here..." value="Paola">
@@ -1093,7 +1150,6 @@
     </div>
 
     <div class="font-previews-head">
-      <span class="overline">Available Fonts</span>
       <span class="files-count" id="fontCount">0 fonts</span>
     </div>
     <div class="font-previews" id="fontPreviews">
@@ -3728,6 +3784,7 @@ document.addEventListener('DOMContentLoaded', function() {
   var sizeValue         = document.getElementById('sizeValue');
   var fontPreviews      = document.getElementById('fontPreviews');
   var fontCount         = document.getElementById('fontCount');
+  var leftChestFilter   = document.getElementById('leftChestFilter');
   var adminOverlay   = document.getElementById('adminOverlay');
   var adminClose     = document.getElementById('adminClose');
   var adminGate      = document.getElementById('adminGate');
@@ -3742,7 +3799,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
   var loadedFonts = [];
   var fontOrder = [];
-  var fontCategories = {};   // { "FileName.ttf": "serif" | "sans" | "script" | "special" }
+  var fontViewFilter = 'all';
+  // Existing category strings still work. A font gets an object only when extra settings are needed.
+  var fontCategories = {};
   var fontsLoaded = false;   // fonts download only when the tab is first opened
 
   /* ===== TABS ===== */
@@ -4403,7 +4462,15 @@ document.addEventListener('DOMContentLoaded', function() {
     var thread = threadColor.value;
     var fabric = fabricColor.value;
     var size = sizeSlider.value;
-    fontCount.textContent = loadedFonts.length + (loadedFonts.length === 1 ? ' font' : ' fonts');
+    var filteredFonts = loadedFonts.filter(function(f) {
+      return fontViewFilter !== 'leftChest' || fontLeftChestOf(f);
+    });
+    fontCount.textContent = filteredFonts.length + (filteredFonts.length === 1 ? ' font' : ' fonts');
+    if (leftChestFilter) {
+      var active = fontViewFilter === 'leftChest';
+      leftChestFilter.classList.toggle('active', active);
+      leftChestFilter.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
 
     if (loadedFonts.length === 0) {
       fontPreviews.innerHTML =
@@ -4411,6 +4478,15 @@ document.addEventListener('DOMContentLoaded', function() {
           '<span class="font-empty-mark">ƒ</span>' +
           '<h4>No fonts available yet</h4>' +
           '<p>check back soon</p>' +
+        '</div>';
+      return;
+    }
+    if (filteredFonts.length === 0) {
+      fontPreviews.innerHTML =
+        '<div class="font-empty">' +
+          '<span class="font-empty-mark">LC</span>' +
+          '<h4>No left-chest fonts enabled</h4>' +
+          '<p>Enable compatible fonts in settings.</p>' +
         '</div>';
       return;
     }
@@ -4437,7 +4513,9 @@ document.addEventListener('DOMContentLoaded', function() {
     FONT_CATS.forEach(function(c) {
       var members = [];
       loadedFonts.forEach(function(f, idx) {
-        if (fontCatOf(f) === c.key) members.push({ f: f, idx: idx });
+        if (fontCatOf(f) !== c.key) return;
+        if (fontViewFilter === 'leftChest' && !fontLeftChestOf(f)) return;
+        members.push({ f: f, idx: idx });
       });
       if (members.length === 0) return;   // hide empty categories
       html += '<div class="font-cat-header">' + c.label +
@@ -4454,6 +4532,13 @@ document.addEventListener('DOMContentLoaded', function() {
         var f = loadedFonts[parseInt(btn.getAttribute('data-export'), 10)];
         if (f) exportFontSvg(f, btn);
       });
+    });
+  }
+
+  if (leftChestFilter) {
+    leftChestFilter.addEventListener('click', function() {
+      fontViewFilter = (fontViewFilter === 'leftChest') ? 'all' : 'leftChest';
+      renderFontPreviews();
     });
   }
 
@@ -4578,12 +4663,52 @@ document.addEventListener('DOMContentLoaded', function() {
     var blob = new Blob([json], { type: 'application/json' });
     return client.storage.from(BUCKET).upload(FONT_CAT_FILE, blob, { upsert: true });
   }
-  // Which category a font belongs to. Anything unassigned falls into 'special'.
+  function fontSettingKey(f) {
+    return f && f.fileName ? f.fileName : f;
+  }
+  function fontRawSetting(f) {
+    return fontCategories[fontSettingKey(f)];
+  }
+  // Which category a font belongs to. Old string settings remain valid.
   function fontCatOf(f) {
-    var key = f && f.fileName ? f.fileName : f;
-    var c = fontCategories[key];
+    var raw = fontRawSetting(f);
+    var c = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? (raw.category || raw.cat || raw.type) : raw;
     for (var i = 0; i < FONT_CATS.length; i++) { if (FONT_CATS[i].key === c) return c; }
     return 'special';
+  }
+  function fontLeftChestOf(f) {
+    var raw = fontRawSetting(f);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+    if (raw.leftChest === true || raw.left_chest === true ||
+        raw.leftChestCompatible === true || raw.left_chest_compatible === true) return true;
+    if (raw.placements && !Array.isArray(raw.placements) &&
+        (raw.placements.leftChest === true || raw.placements.left_chest === true)) return true;
+    var lists = [raw.compatibility, raw.compatible, raw.tags, raw.placements];
+    for (var i = 0; i < lists.length; i++) {
+      if (!Array.isArray(lists[i])) continue;
+      for (var j = 0; j < lists[i].length; j++) {
+        var v = String(lists[i][j]).toLowerCase().replace(/[ _]+/g, '-');
+        if (v === 'left-chest' || v === 'leftchest') return true;
+      }
+    }
+    return false;
+  }
+  function setFontCategory(fontName, category) {
+    var raw = fontCategories[fontName];
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      raw.category = category;
+      fontCategories[fontName] = raw;
+    } else {
+      fontCategories[fontName] = category;
+    }
+  }
+  function setFontLeftChest(fontName, enabled) {
+    var raw = fontCategories[fontName];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      raw = { category: fontCatOf(fontName) };
+    }
+    raw.leftChest = !!enabled;
+    fontCategories[fontName] = raw;
   }
   function sortFontsByOrder(fonts, getFileName) {
     var sorted = [];
@@ -4754,12 +4879,14 @@ document.addEventListener('DOMContentLoaded', function() {
         var atTop = i === 0;
         var atBottom = i === sorted.length - 1;
         var cur = fontCatOf(f.name);
+        var leftChest = fontLeftChestOf(f.name);
         var opts = FONT_CATS.map(function(c) {
           return '<option value="' + c.key + '"' + (c.key === cur ? ' selected' : '') + '>' + c.label + '</option>';
         }).join('');
         return '<div class="admin-font-item">' +
           '<span class="admin-font-item-name">' + escapeHtml(f.name) + '</span>' +
           '<select class="admin-font-cat" data-name="' + escapeHtml(f.name) + '" title="Category">' + opts + '</select>' +
+          '<button type="button" class="admin-font-leftchest' + (leftChest ? ' on' : '') + '" data-name="' + escapeHtml(f.name) + '" aria-pressed="' + (leftChest ? 'true' : 'false') + '" title="Include this font in the Left Chest filter">Left chest</button>' +
           '<div class="admin-font-actions">' +
             '<button class="admin-font-move" data-action="up" data-name="' + escapeHtml(f.name) + '" title="Move up"' + (atTop ? ' disabled' : '') + '>&uarr;</button>' +
             '<button class="admin-font-move" data-action="down" data-name="' + escapeHtml(f.name) + '" title="Move down"' + (atBottom ? ' disabled' : '') + '>&darr;</button>' +
@@ -4771,9 +4898,22 @@ document.addEventListener('DOMContentLoaded', function() {
       adminFontList.querySelectorAll('.admin-font-cat').forEach(function(sel) {
         sel.addEventListener('change', function() {
           var fontName = sel.dataset.name;
-          fontCategories[fontName] = sel.value;
+          setFontCategory(fontName, sel.value);
           saveFontCategories().then(function() {
             renderFontPreviews();   // regroup the customer view (no re-download needed)
+          });
+        });
+      });
+
+      adminFontList.querySelectorAll('.admin-font-leftchest').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var fontName = btn.dataset.name;
+          var enabled = !fontLeftChestOf(fontName);
+          setFontLeftChest(fontName, enabled);
+          btn.classList.toggle('on', enabled);
+          btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+          saveFontCategories().then(function() {
+            renderFontPreviews();
           });
         });
       });
