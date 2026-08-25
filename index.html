@@ -874,6 +874,16 @@
   }
 
   .admin-panel { display: flex; flex-direction: column; gap: 22px; }
+  .admin-tool-note { font-family:'Teko','Oswald',sans-serif; font-size:15px; line-height:1.35; color:var(--ink-soft); margin:-5px 0 10px; }
+  .admin-tool-list { display:flex; flex-direction:column; gap:8px; }
+  .admin-tool-row { width:100%; display:flex; align-items:center; justify-content:space-between; gap:14px; padding:11px 12px; border:1px solid rgba(74,52,36,.18); border-radius:8px; background:rgba(255,255,255,.48); color:var(--ink); cursor:pointer; text-align:left; }
+  .admin-tool-row:hover { border-color:rgba(31,77,62,.45); background:rgba(31,77,62,.04); }
+  .admin-tool-name { font-family:'Teko','Oswald',sans-serif; font-size:18px; letter-spacing:.05em; text-transform:uppercase; line-height:1; }
+  .admin-tool-state { position:relative; flex:0 0 48px; width:48px; height:27px; border-radius:999px; background:#cfc6b4; transition:background .16s; }
+  .admin-tool-state::after { content:''; position:absolute; width:21px; height:21px; left:3px; top:3px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.2); transition:transform .16s; }
+  .admin-tool-row.on .admin-tool-state { background:var(--green); }
+  .admin-tool-row.on .admin-tool-state::after { transform:translateX(21px); }
+  .admin-tool-status { min-height:18px; margin-top:8px; font-family:'Teko','Oswald',sans-serif; font-size:14px; letter-spacing:.06em; color:var(--green); }
   .admin-section h4.svc-h {
     font-family: 'Teko', sans-serif;
     font-size: 13px;
@@ -1096,8 +1106,8 @@
   <span class="tab-slider" id="tabSlider"></span>
   <button class="tab-btn active" data-tab="catalog">Catalog</button>
   <button class="tab-btn" data-tab="fonts">Font</button>
-  <button class="tab-btn" data-tab="files">File</button>
-  <button class="tab-btn" data-tab="mockup">Model</button>
+  <button class="tab-btn" data-tab="files" hidden>File</button>
+  <button class="tab-btn" data-tab="mockup" hidden>Model</button>
 </div>
 
 <main>
@@ -1874,9 +1884,11 @@
     state.folders=state.folders.filter(function(f){return ids.indexOf(f.id)&lt;0;});
   }
 
+  var mockupEnabled = false;
   var MOCKUP_URL = (function(){ try{ return window.top.location.origin + &quot;/model.html&quot;; }catch(e){ return &quot;https://tools.brochcustom.com/model.html&quot;; } })();
 
   function sendToMockup(dataURL){
+    if(!mockupEnabled){ toast(&quot;Mockup tool is temporarily unavailable&quot;); return; }
     if(!dataURL){ toast(&quot;No image to preview&quot;); return; }
     // open the mockup in the click handler (popup blockers), then send the design once it's READY
     var win = window.open(MOCKUP_URL, &quot;_blank&quot;);
@@ -1909,7 +1921,7 @@
     ov.innerHTML='&lt;button class=&quot;lb-close&quot; aria-label=&quot;Close&quot;&gt;\u00d7&lt;/button&gt;'+
       '&lt;div class=&quot;lb-img&quot;&gt;&lt;img src=&quot;'+src+'&quot; alt=&quot;Design&quot; draggable=&quot;false&quot; oncontextmenu=&quot;return false&quot; style=&quot;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;pointer-events:none;&quot;&gt;&lt;/div&gt;'+
       (caption?'&lt;div class=&quot;lb-name&quot;&gt;'+caption+'&lt;/div&gt;':'')+
-      '&lt;button class=&quot;lb-mockup&quot; type=&quot;button&quot;&gt;See on a mockup&lt;/button&gt;';
+      (mockupEnabled?'&lt;button class=&quot;lb-mockup&quot; type=&quot;button&quot;&gt;See on a mockup&lt;/button&gt;':'');
     ov.addEventListener(&quot;click&quot;,function(e){
       if(e.target.classList.contains(&quot;lb-mockup&quot;)){ e.stopPropagation(); sendToMockup(src); return; }
       if(e.target===ov||e.target.classList.contains(&quot;lb-close&quot;)) document.body.removeChild(ov);
@@ -1950,6 +1962,7 @@
   window.addEventListener(&quot;message&quot;,function(e){
     if(e.data===&quot;bc-admin-on&quot; &amp;&amp; !state.admin){ state.admin=true; render(); toast(&quot;Editing on&quot;); }
     if(e.data===&quot;bc-admin-off&quot; &amp;&amp; state.admin){ state.admin=false; render(); toast(&quot;Editing off&quot;); }
+    if(e.data &amp;&amp; e.data.type===&quot;bc-tools-availability&quot;){ mockupEnabled = e.data.mockup !== false; }
   });
   document.getElementById(&quot;adminLink&quot;).addEventListener(&quot;click&quot;,function(){
     if(state.admin){ state.admin=false; render(); toast(&quot;Editing off&quot;); return; }
@@ -3662,13 +3675,24 @@ try { window.parent.postMessage('BC_DST_READY', '*'); } catch(e) {}
     </div>
     <div class="modal-body">
       <div class="admin-gate" id="adminGate">
-        <p class="admin-gate-intro">Enter admin password to manage fonts</p>
+        <p class="admin-gate-intro">Enter admin password to manage tools and fonts</p>
         <input type="password" id="adminPassword" class="admin-password-input" placeholder="••••" autocomplete="off">
         <button class="admin-submit" id="adminSubmit">Unlock</button>
         <div class="admin-error" id="adminError"></div>
       </div>
 
       <div class="admin-panel" id="adminPanel" style="display:none">
+        <div class="admin-section">
+          <h4 class="svc-h">Tools availability</h4>
+          <p class="admin-tool-note">Turn customer-facing tools on or off. Changes save automatically.</p>
+          <div class="admin-tool-list">
+            <button type="button" class="admin-tool-row" data-tool-toggle="catalog"><span class="admin-tool-name">Catalog</span><span class="admin-tool-state" aria-hidden="true"></span></button>
+            <button type="button" class="admin-tool-row" data-tool-toggle="fonts"><span class="admin-tool-name">Font Preview</span><span class="admin-tool-state" aria-hidden="true"></span></button>
+            <button type="button" class="admin-tool-row" data-tool-toggle="files"><span class="admin-tool-name">File Share</span><span class="admin-tool-state" aria-hidden="true"></span></button>
+            <button type="button" class="admin-tool-row" data-tool-toggle="mockup"><span class="admin-tool-name">Mockup / Model</span><span class="admin-tool-state" aria-hidden="true"></span></button>
+          </div>
+          <div class="admin-tool-status" id="adminToolStatus"></div>
+        </div>
         <div class="admin-section">
           <h4 class="svc-h">Upload fonts</h4>
           <div class="admin-font-upload" id="adminFontDrop">
@@ -3706,6 +3730,7 @@ document.addEventListener('DOMContentLoaded', function() {
   var FONTS_FOLDER = '_fonts';
   var FONT_ORDER_FILE = '_settings/font-order.json';
   var FONT_CAT_FILE = '_settings/font-categories.json';
+  var TOOL_SETTINGS_FILE = '_settings/tools-availability.json';
   // The four font categories, shown in this order. 'special' is the catch-all
   // for anything not yet assigned.
   var FONT_CATS = [
@@ -3746,12 +3771,7 @@ document.addEventListener('DOMContentLoaded', function() {
       fired = false; clearTimeout(timer);
       timer = setTimeout(function () {
         fired = true;
-        if (!toolsAdminOn) { openAdmin(); return; }          // locked → password gate
-        if (currentTab() === 'fonts') { openAdmin(); return; } // unlocked, on Fonts → the panel
-        toolsAdminOn = false;                                  // unlocked elsewhere → editing off
-        var cf = document.getElementById('catalogFrame');
-        if (cf && cf.contentWindow) cf.contentWindow.postMessage('bc-admin-off', '*');
-        adminNote('Editing off');
+        openAdmin(); // locked → password gate; unlocked → tools/font admin panel
       }, 2000);
     }
     function cancel() { clearTimeout(timer); }
@@ -3796,6 +3816,8 @@ document.addEventListener('DOMContentLoaded', function() {
   var adminFontInput = document.getElementById('adminFontInput');
   var adminStatus    = document.getElementById('adminStatus');
   var adminFontList  = document.getElementById('adminFontList');
+  var adminToolStatus = document.getElementById('adminToolStatus');
+  var adminToolRows   = Array.prototype.slice.call(document.querySelectorAll('[data-tool-toggle]'));
 
   var loadedFonts = [];
   var fontOrder = [];
@@ -3804,10 +3826,97 @@ document.addEventListener('DOMContentLoaded', function() {
   var fontCategories = {};
   var fontsLoaded = false;   // fonts download only when the tab is first opened
 
+  /* ===== TOOL AVAILABILITY ===== */
+  // Defaults intentionally keep File Share and the Mockup/Model off until an admin enables them.
+  var toolAvailability = { catalog: true, fonts: true, files: false, mockup: false };
+
+  function syncToolSwitches() {
+    adminToolRows.forEach(function(row) {
+      var key = row.getAttribute('data-tool-toggle');
+      var on = toolAvailability[key] !== false;
+      row.classList.toggle('on', on);
+      row.setAttribute('aria-pressed', on ? 'true' : 'false');
+      row.title = on ? 'On' : 'Off';
+    });
+  }
+
+  function tellCatalogToolAvailability() {
+    var cf = document.getElementById('catalogFrame');
+    if (cf && cf.contentWindow) {
+      try { cf.contentWindow.postMessage({ type:'bc-tools-availability', mockup: toolAvailability.mockup !== false }, '*'); } catch (e) {}
+    }
+  }
+
+  function firstEnabledTool() {
+    var order = ['catalog','fonts','files','mockup'];
+    for (var i=0; i<order.length; i++) if (toolAvailability[order[i]] !== false) return order[i];
+    return null;
+  }
+
+  function applyToolAvailability() {
+    ['catalog','fonts','files','mockup'].forEach(function(key) {
+      var btn = document.querySelector('.tab-btn[data-tab="' + key + '"]');
+      if (btn) btn.hidden = (toolAvailability[key] === false);
+    });
+    var active = currentTab();
+    if (toolAvailability[active] === false) {
+      var next = firstEnabledTool();
+      if (next) activateTab(next);
+      else {
+        document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
+        document.querySelectorAll('.tab-panel').forEach(function(p){ p.classList.remove('active'); });
+        if (history.replaceState) history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    }
+    syncToolSwitches();
+    tellCatalogToolAvailability();
+    setTimeout(positionTabSlider, 0);
+  }
+
+  function loadToolAvailability() {
+    return client.storage.from(BUCKET).download(TOOL_SETTINGS_FILE).then(function(result) {
+      if (result.error || !result.data) { applyToolAvailability(); return; }
+      return result.data.text().then(function(txt) {
+        try {
+          var saved = JSON.parse(txt);
+          ['catalog','fonts','files','mockup'].forEach(function(key) {
+            if (typeof saved[key] === 'boolean') toolAvailability[key] = saved[key];
+          });
+        } catch (e) {}
+        applyToolAvailability();
+      });
+    }).catch(function(){ applyToolAvailability(); });
+  }
+
+  function saveToolAvailability() {
+    if (adminToolStatus) adminToolStatus.textContent = 'Saving…';
+    var payload = { v:1, catalog:!!toolAvailability.catalog, fonts:!!toolAvailability.fonts, files:!!toolAvailability.files, mockup:!!toolAvailability.mockup };
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+    return client.storage.from(BUCKET).upload(TOOL_SETTINGS_FILE, blob, { upsert:true, cacheControl:'0' }).then(function(result) {
+      if (result.error) throw result.error;
+      if (adminToolStatus) { adminToolStatus.textContent = '✓ Saved'; setTimeout(function(){ adminToolStatus.textContent=''; }, 1600); }
+    }).catch(function() {
+      if (adminToolStatus) adminToolStatus.textContent = 'Could not save';
+    });
+  }
+
+  adminToolRows.forEach(function(row) {
+    row.addEventListener('click', function() {
+      var key = row.getAttribute('data-tool-toggle');
+      toolAvailability[key] = !(toolAvailability[key] !== false);
+      applyToolAvailability();
+      saveToolAvailability();
+    });
+  });
+
+  var catalogFrameForSettings = document.getElementById('catalogFrame');
+  if (catalogFrameForSettings) catalogFrameForSettings.addEventListener('load', tellCatalogToolAvailability);
+
   /* ===== TABS ===== */
   var tabButtons = document.querySelectorAll('.tab-btn');
   var tabPanels  = document.querySelectorAll('.tab-panel');
   function activateTab(tabName) {
+    if (toolAvailability && toolAvailability[tabName] === false) return;
     var btn = document.querySelector('.tab-btn[data-tab="' + tabName + '"]');
     var panel = document.getElementById('tab-' + tabName);
     if (!btn || !panel) return;
@@ -3881,6 +3990,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var h = (window.location.hash || '').replace('#', '');
     if (h && document.getElementById('tab-' + h)) activateTab(h);
   });
+  loadToolAvailability();
 
   /* ===== SHARE THIS TOOL ===== */
   var navShare = document.getElementById('navShare');
@@ -4777,10 +4887,18 @@ document.addEventListener('DOMContentLoaded', function() {
   /* ===== ADMIN ===== */
   function openAdmin() {
     adminOverlay.classList.add('open');
+    adminError.textContent = '';
+    syncToolSwitches();
+    if (toolsAdminOn) {
+      adminGate.style.display = 'none';
+      adminPanel.style.display = 'flex';
+      if (!fontsLoaded) loadFontsFromSupabase();
+      else renderAdminFontList();
+      return;
+    }
     adminGate.style.display = 'flex';
     adminPanel.style.display = 'none';
     adminPassword.value = '';
-    adminError.textContent = '';
     setTimeout(function() { adminPassword.focus(); }, 100);
   }
   function closeAdmin() { adminOverlay.classList.remove('open'); }
@@ -4794,14 +4912,11 @@ document.addEventListener('DOMContentLoaded', function() {
       // the catalog runs in its own frame — turn its editing on too, no second password
       var cf = document.getElementById('catalogFrame');
       if (cf && cf.contentWindow) cf.contentWindow.postMessage('bc-admin-on', '*');
-      if (currentTab() === 'fonts') {
-        adminGate.style.display = 'none';
-        adminPanel.style.display = 'flex';
-        renderAdminFontList();
-      } else {
-        closeAdmin();                 // no fonts panel outside the Fonts tab
-        adminNote('Editing on');
-      }
+      adminGate.style.display = 'none';
+      adminPanel.style.display = 'flex';
+      syncToolSwitches();
+      if (!fontsLoaded) loadFontsFromSupabase();
+      else renderAdminFontList();
     } else {
       adminError.textContent = 'Incorrect password';
       adminPassword.value = '';
