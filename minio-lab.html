@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MinIO Lab — Broch Custom</title>
+<style>
+  :root{
+    --green:#1F4D3E; --cream:#F2EADD; --pink:#F2AEB5; --burgundy:#6B2233;
+    --ink:#20302a; --line:rgba(31,77,62,.18);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:24px 16px 64px;
+    background:var(--cream); color:var(--ink);
+    font-family:"Teko","Trebuchet MS",system-ui,sans-serif;
+    font-size:18px; line-height:1.45;
+  }
+  .wrap{max-width:760px;margin:0 auto}
+  h1{font-family:"Schadow Black Condensed","Arial Black",sans-serif;
+     color:var(--green); font-size:34px; margin:0 0 4px; letter-spacing:.5px}
+  .sub{color:var(--burgundy); margin:0 0 24px; font-size:16px}
+  .card{background:#fffdf8; border:1px solid var(--line); border-radius:10px;
+        padding:18px; margin-bottom:18px}
+  .card h2{font-family:"Schadow Black Condensed","Arial Black",sans-serif;
+     color:var(--green); font-size:21px; margin:0 0 10px}
+  button{
+    font-family:inherit; font-size:17px; cursor:pointer;
+    background:var(--green); color:var(--cream); border:0;
+    border-radius:7px; padding:9px 18px; margin:4px 6px 4px 0;
+  }
+  button:disabled{opacity:.45; cursor:default}
+  button.ghost{background:transparent;color:var(--green);border:1px solid var(--green)}
+  input[type=file]{font-family:inherit; font-size:16px; margin:6px 0}
+  .log{
+    background:#131a17; color:#d8e6dd; border-radius:8px; padding:12px;
+    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px;
+    line-height:1.5; white-space:pre-wrap; word-break:break-word;
+    max-height:320px; overflow:auto; margin-top:10px;
+  }
+  .log .ok{color:#8fe3a8}
+  .log .bad{color:#ff9d9d}
+  .log .dim{color:#8fa39a}
+  .shots{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px}
+  .shot{border:1px solid var(--line);border-radius:8px;background:#fff;
+        padding:8px;width:150px;text-align:center}
+  .shot img{max-width:100%;max-height:120px;display:block;margin:0 auto 6px}
+  .shot span{font-size:13px;color:var(--burgundy);word-break:break-all}
+  .status{font-size:16px;margin-top:8px}
+  .pill{display:inline-block;padding:2px 10px;border-radius:20px;font-size:14px}
+  .pill.good{background:#dff3e4;color:#17603c}
+  .pill.fail{background:#fadadd;color:var(--burgundy)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>MinIO Lab</h1>
+  <p class="sub">A throwaway page for testing NAS file storage. Touches nothing else.</p>
+
+  <div class="card">
+    <h2>1 · Connection</h2>
+    <p class="dim">Checks that Vercel can reach MinIO on the NAS.</p>
+    <button id="btnConn">Test connection</button>
+    <div id="connStatus" class="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>2 · Upload a file</h2>
+    <p class="dim">Sends the file straight from this browser to your NAS.</p>
+    <input type="file" id="file" accept="image/*,.svg,.png,.jpg,.jpeg,.webp">
+    <br>
+    <button id="btnUp" disabled>Upload to MinIO</button>
+    <div id="upStatus" class="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>3 · Read it back</h2>
+    <p class="dim">Asks for a viewing link and displays the image.</p>
+    <button id="btnView" class="ghost">Show uploaded files</button>
+    <div id="shots" class="shots"></div>
+  </div>
+
+  <div class="card">
+    <h2>Log</h2>
+    <div id="log" class="log"><span class="dim">Waiting…</span></div>
+    <button id="btnClear" class="ghost">Clear log</button>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var API = "/api/minio-file";
+  var TEST_API = "/api/minio-test";
+  var PREFIX = "_designs/lab/";
+  var uploaded = [];               // keys uploaded during this page visit
+
+  var logEl = document.getElementById("log");
+  function log(msg, cls){
+    var t = new Date().toLocaleTimeString();
+    var span = document.createElement("span");
+    span.className = cls || "";
+    span.textContent = "[" + t + "] " + msg + "\n";
+    if(logEl.querySelector(".dim") && logEl.children.length === 1 &&
+       logEl.textContent.indexOf("Waiting") === 0){ logEl.innerHTML = ""; }
+    logEl.appendChild(span);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function pill(el, good, text){
+    el.innerHTML = '<span class="pill ' + (good ? "good" : "fail") + '">' + text + '</span>';
+  }
+
+  function postJson(url, payload){
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function(r){
+      return r.text().then(function(txt){
+        var data;
+        try { data = JSON.parse(txt); }
+        catch(e){ throw new Error("Server sent something that wasn't JSON (HTTP " + r.status + "): " + txt.slice(0,180)); }
+        return data;
+      });
+    });
+  }
+
+  /* ---------- 1. connection ---------- */
+  document.getElementById("btnConn").addEventListener("click", function(){
+    var out = document.getElementById("connStatus");
+    out.textContent = "Checking…";
+    log("Asking Vercel to list the bucket…", "dim");
+    fetch(TEST_API).then(function(r){ return r.json(); }).then(function(d){
+      if(d.ok){
+        pill(out, true, "Connected — " + d.objectsShown + " objects visible");
+        log("Connected to bucket '" + d.bucket + "' at " + d.endpoint, "ok");
+      } else {
+        pill(out, false, "Failed");
+        log("Failed at step '" + d.step + "': " + (d.message || d.error), "bad");
+        if(d.missing) log("Missing variables: " + d.missing.join(", "), "bad");
+      }
+    }).catch(function(e){
+      pill(out, false, "Failed");
+      log("Could not reach " + TEST_API + " — " + e.message, "bad");
+    });
+  });
+
+  /* ---------- 2. upload ---------- */
+  var fileInput = document.getElementById("file");
+  var btnUp = document.getElementById("btnUp");
+  fileInput.addEventListener("change", function(){
+    btnUp.disabled = !fileInput.files.length;
+  });
+
+  btnUp.addEventListener("click", function(){
+    var f = fileInput.files[0];
+    if(!f) return;
+    var out = document.getElementById("upStatus");
+    var safeName = f.name.replace(/[^A-Za-z0-9._-]/g, "_");
+    var key = PREFIX + Date.now() + "-" + safeName;
+
+    btnUp.disabled = true;
+    out.textContent = "Requesting an upload link…";
+    log("File: " + f.name + " (" + Math.round(f.size/1024) + " KB, " + (f.type || "unknown type") + ")", "dim");
+
+    postJson(API, { action: "upload-url", key: key, contentType: f.type || "application/octet-stream" })
+      .then(function(d){
+        if(!d.ok) throw new Error(d.message || d.error || "no upload link returned");
+        log("Got a signed upload link, valid " + d.expiresIn + "s.", "ok");
+        out.textContent = "Uploading to the NAS…";
+        return fetch(d.url, {
+          method: "PUT",
+          headers: { "Content-Type": f.type || "application/octet-stream" },
+          body: f
+        });
+      })
+      .then(function(r){
+        if(!r.ok){
+          return r.text().then(function(t){
+            throw new Error("MinIO refused the upload (HTTP " + r.status + "). " + t.slice(0,200));
+          });
+        }
+        uploaded.push(key);
+        pill(out, true, "Uploaded");
+        log("Stored as " + key, "ok");
+      })
+      .catch(function(e){
+        pill(out, false, "Upload failed");
+        log(e.message, "bad");
+        if(/Failed to fetch|NetworkError|CORS/i.test(e.message)){
+          log("This looks like a CORS block: MinIO is refusing uploads sent from this website's address.", "bad");
+        }
+      })
+      .finally(function(){ btnUp.disabled = false; });
+  });
+
+  /* ---------- 3. read back ---------- */
+  document.getElementById("btnView").addEventListener("click", function(){
+    var shots = document.getElementById("shots");
+    shots.innerHTML = "";
+    if(!uploaded.length){
+      log("Nothing uploaded yet in this session.", "dim");
+      return;
+    }
+    log("Requesting viewing links for " + uploaded.length + " file(s)…", "dim");
+    postJson(API, { action: "view-urls", keys: uploaded })
+      .then(function(d){
+        if(!d.ok) throw new Error(d.message || d.error || "no links returned");
+        Object.keys(d.urls).forEach(function(k){
+          var box = document.createElement("div");
+          box.className = "shot";
+          var img = document.createElement("img");
+          img.alt = k;
+          img.src = d.urls[k];
+          img.onerror = function(){
+            log("Browser could not load " + k + " — likely a CORS or link problem.", "bad");
+            box.innerHTML = '<span class="bad">could not display</span>';
+          };
+          img.onload = function(){ log("Displayed " + k, "ok"); };
+          var cap = document.createElement("span");
+          cap.textContent = k.replace(PREFIX, "");
+          box.appendChild(img);
+          box.appendChild(cap);
+          shots.appendChild(box);
+        });
+      })
+      .catch(function(e){ log(e.message, "bad"); });
+  });
+
+  document.getElementById("btnClear").addEventListener("click", function(){
+    logEl.innerHTML = '<span class="dim">Cleared.</span>';
+  });
+
+})();
+</script>
+</body>
+</html>
