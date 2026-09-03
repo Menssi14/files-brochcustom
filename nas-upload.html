@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NAS Upload — Broch Custom</title>
+<style>
+  :root{
+    --green:#1F4D3E; --cream:#F2EADD; --pink:#F2AEB5; --burgundy:#6B2233;
+    --ink:#20302a; --line:rgba(31,77,62,.18);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:24px 16px 64px;
+    background:var(--cream); color:var(--ink);
+    font-family:"Teko","Trebuchet MS",system-ui,sans-serif;
+    font-size:18px; line-height:1.45;
+  }
+  .wrap{max-width:820px;margin:0 auto}
+  h1{font-family:"Schadow Black Condensed","Arial Black",sans-serif;
+     color:var(--green); font-size:34px; margin:0 0 4px; letter-spacing:.5px}
+  .sub{color:var(--burgundy); margin:0 0 24px; font-size:16px}
+  .card{background:#fffdf8; border:1px solid var(--line); border-radius:10px;
+        padding:18px; margin-bottom:18px}
+  .card h2{font-family:"Schadow Black Condensed","Arial Black",sans-serif;
+     color:var(--green); font-size:21px; margin:0 0 10px}
+  .hint{color:#5c6b64; font-size:15px; margin:0 0 12px}
+  button{
+    font-family:inherit; font-size:17px; cursor:pointer;
+    background:var(--green); color:var(--cream); border:0;
+    border-radius:7px; padding:9px 18px; margin:4px 6px 4px 0;
+  }
+  button:disabled{opacity:.45; cursor:default}
+  button.ghost{background:transparent;color:var(--green);border:1px solid var(--green)}
+  button.danger{background:var(--burgundy)}
+  input[type=file]{font-family:inherit; font-size:16px; margin:6px 0; max-width:100%}
+  select, input[type=text]{
+    font-family:inherit; font-size:16px; padding:7px 9px;
+    border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink);
+  }
+  .row{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px}
+  .row label{font-size:15px; color:var(--burgundy); min-width:96px}
+  .keypreview{
+    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px;
+    background:#eef3f0; border:1px solid var(--line); border-radius:7px;
+    padding:8px 10px; margin:8px 0 4px; word-break:break-all; color:#17603c;
+  }
+  .queue{margin-top:12px}
+  .qrow{border:1px solid var(--line); border-radius:8px; background:#fff;
+        padding:9px 11px; margin-bottom:8px}
+  .qtop{display:flex; justify-content:space-between; gap:10px; font-size:15px}
+  .qname{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px;
+         word-break:break-all; color:var(--ink)}
+  .qstate{white-space:nowrap; font-size:14px}
+  .bar{height:6px; background:#e3ebe7; border-radius:4px; margin-top:7px; overflow:hidden}
+  .bar i{display:block; height:100%; width:0; background:var(--green); transition:width .18s}
+  .log{
+    background:#131a17; color:#d8e6dd; border-radius:8px; padding:12px;
+    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px;
+    line-height:1.5; white-space:pre-wrap; word-break:break-word;
+    max-height:320px; overflow:auto; margin-top:10px;
+  }
+  .log .ok{color:#8fe3a8}
+  .log .bad{color:#ff9d9d}
+  .log .dim{color:#8fa39a}
+  .pill{display:inline-block;padding:2px 10px;border-radius:20px;font-size:14px}
+  .pill.good{background:#dff3e4;color:#17603c}
+  .pill.fail{background:#fadadd;color:var(--burgundy)}
+  .pill.work{background:#e8eef5;color:#31506b}
+  .status{font-size:16px;margin-top:8px}
+  table{width:100%; border-collapse:collapse; margin-top:10px; font-size:15px}
+  th,td{text-align:left; padding:7px 8px; border-bottom:1px solid var(--line)}
+  th{color:var(--burgundy); font-size:14px; text-transform:uppercase; letter-spacing:.4px}
+  td.k{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px; word-break:break-all}
+  td.n{white-space:nowrap; color:#5c6b64}
+  @media (max-width:700px){
+    .row label{min-width:100%}
+    select, input[type=text]{width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>NAS Upload</h1>
+  <p class="sub">Puts files on the Synology NAS, in the folder you choose, under their own names.</p>
+
+  <div class="card">
+    <h2>1 &middot; Where it goes</h2>
+    <p class="hint">Pick the folder. The subfolder box is optional.</p>
+    <div class="row">
+      <label for="prefix">Folder</label>
+      <select id="prefix">
+        <option value="_store/">_store/ &mdash; store assets, 3D models</option>
+        <option value="_designs/">_designs/ &mdash; catalog designs</option>
+        <option value="_catalog/">_catalog/ &mdash; catalog data</option>
+        <option value="_fonts/">_fonts/ &mdash; font files</option>
+        <option value="_share/">_share/ &mdash; file sharing</option>
+        <option value="_orders/">_orders/ &mdash; order files</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="sub">Subfolder</label>
+      <input type="text" id="sub" placeholder="models" value="models">
+    </div>
+    <div class="keypreview" id="keyPreview">_store/models/</div>
+  </div>
+
+  <div class="card">
+    <h2>2 &middot; Choose files</h2>
+    <p class="hint">Any file type. Names are kept exactly as they are, so uploading the same name again replaces the old file.</p>
+    <input type="file" id="file" multiple>
+    <br>
+    <button id="btnUp" disabled>Upload to NAS</button>
+    <button id="btnClearQ" class="ghost">Clear list</button>
+    <div class="queue" id="queue"></div>
+  </div>
+
+  <div class="card">
+    <h2>3 &middot; What is in that folder</h2>
+    <p class="hint">Reads the real object list off the NAS.</p>
+    <button id="btnList" class="ghost">List folder</button>
+    <div id="listStatus" class="status"></div>
+    <div id="listWrap"></div>
+  </div>
+
+  <div class="card">
+    <h2>4 &middot; Can THIS device reach the NAS?</h2>
+    <p class="hint">Downloads one real file straight from the NAS to this browser. This is the test that matters on a phone &mdash; run it on cellular, not home wi-fi.</p>
+    <button id="btnReach">Check from this device</button>
+    <div id="reachStatus" class="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>Log</h2>
+    <div id="log" class="log"><span class="dim">Waiting&hellip;</span></div>
+    <button id="btnClearLog" class="ghost">Clear log</button>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var API = "/api/minio-file";
+
+  var logEl   = document.getElementById("log");
+  var prefixEl= document.getElementById("prefix");
+  var subEl   = document.getElementById("sub");
+  var keyPrev = document.getElementById("keyPreview");
+  var fileIn  = document.getElementById("file");
+  var btnUp   = document.getElementById("btnUp");
+  var queueEl = document.getElementById("queue");
+  var listWrap= document.getElementById("listWrap");
+
+  var queue = [];        // [{file, key, row, bar, state}]
+  var lastListed = [];   // keys from the most recent List folder
+
+  /* ---------------- helpers ---------------- */
+
+  function log(msg, cls){
+    var t = new Date().toLocaleTimeString();
+    var span = document.createElement("span");
+    span.className = cls || "";
+    span.textContent = "[" + t + "] " + msg + "\n";
+    if(logEl.children.length === 1 && logEl.textContent.indexOf("Waiting") === 0){
+      logEl.innerHTML = "";
+    }
+    logEl.appendChild(span);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function pill(el, kind, text){
+    el.innerHTML = '<span class="pill ' + kind + '">' + text + '</span>';
+  }
+
+  function kb(n){
+    if(n < 1024) return n + " B";
+    if(n < 1048576) return (n/1024).toFixed(0) + " KB";
+    return (n/1048576).toFixed(2) + " MB";
+  }
+
+  function postJson(url, payload){
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function(r){
+      return r.text().then(function(txt){
+        var data;
+        try { data = JSON.parse(txt); }
+        catch(e){
+          throw new Error("Server sent something that wasn't JSON (HTTP " + r.status + "): " + txt.slice(0,180));
+        }
+        if(!data.ok) throw new Error(data.message || data.error || "Storage request failed");
+        return data;
+      });
+    });
+  }
+
+  // Folder path, always ending in a single slash, never starting with one.
+  function folder(){
+    var base = prefixEl.value;
+    var sub  = (subEl.value || "").trim();
+    sub = sub.replace(/^[\/\s]+|[\/\s]+$/g, "");     // trim slashes and spaces
+    sub = sub.replace(/\.\./g, "");                  // no folder-escape
+    sub = sub.replace(/[^A-Za-z0-9._\/-]/g, "-");    // safe characters only
+    sub = sub.replace(/\/{2,}/g, "/");               // no empty-named folders
+    sub = sub.replace(/^\/+|\/+$/g, "");             // trim again after collapsing
+    return sub ? base + sub + "/" : base;
+  }
+
+  // Keep the filename recognisable; only strip characters that would break a key.
+  function safeName(name){
+    return String(name).replace(/\.\./g, "").replace(/[^A-Za-z0-9._-]/g, "-");
+  }
+
+  function contentTypeFor(f){
+    if(f.type) return f.type;
+    var n = f.name.toLowerCase();
+    if(n.endsWith(".glb"))  return "model/gltf-binary";
+    if(n.endsWith(".gltf")) return "model/gltf+json";
+    if(n.endsWith(".dst"))  return "application/octet-stream";
+    if(n.endsWith(".svg"))  return "image/svg+xml";
+    if(n.endsWith(".json")) return "application/json";
+    if(n.endsWith(".woff2"))return "font/woff2";
+    if(n.endsWith(".ttf"))  return "font/ttf";
+    if(n.endsWith(".otf"))  return "font/otf";
+    return "application/octet-stream";
+  }
+
+  function refreshKeyPreview(){
+    var f = folder();
+    var first = fileIn.files && fileIn.files[0];
+    keyPrev.textContent = first ? f + safeName(first.name) : f;
+  }
+
+  prefixEl.addEventListener("change", function(){ refreshKeyPreview(); buildQueue(); });
+  subEl.addEventListener("input",   function(){ refreshKeyPreview(); buildQueue(); });
+
+  /* ---------------- queue ---------------- */
+
+  function buildQueue(){
+    queueEl.innerHTML = "";
+    queue = [];
+    var files = fileIn.files ? Array.prototype.slice.call(fileIn.files) : [];
+    var f = folder();
+
+    files.forEach(function(file){
+      var key = f + safeName(file.name);
+
+      var row = document.createElement("div");
+      row.className = "qrow";
+
+      var top = document.createElement("div");
+      top.className = "qtop";
+
+      var nm = document.createElement("span");
+      nm.className = "qname";
+      nm.textContent = key;
+
+      var st = document.createElement("span");
+      st.className = "qstate";
+      st.textContent = kb(file.size);
+
+      top.appendChild(nm);
+      top.appendChild(st);
+
+      var bar = document.createElement("div");
+      bar.className = "bar";
+      var fill = document.createElement("i");
+      bar.appendChild(fill);
+
+      row.appendChild(top);
+      row.appendChild(bar);
+      queueEl.appendChild(row);
+
+      queue.push({ file:file, key:key, state:st, fill:fill });
+    });
+
+    btnUp.disabled = queue.length === 0;
+    refreshKeyPreview();
+  }
+
+  fileIn.addEventListener("change", buildQueue);
+
+  document.getElementById("btnClearQ").addEventListener("click", function(){
+    fileIn.value = "";
+    queueEl.innerHTML = "";
+    queue = [];
+    btnUp.disabled = true;
+    refreshKeyPreview();
+  });
+
+  /* ---------------- upload ---------------- */
+
+  // XHR rather than fetch, purely so the progress bar can move on a slow uplink.
+  function putFile(url, file, ctype, onProgress){
+    return new Promise(function(resolve, reject){
+      var xhr = new XMLHttpRequest();
+      xhr.open("PUT", url, true);
+      xhr.setRequestHeader("Content-Type", ctype);
+      xhr.upload.onprogress = function(e){
+        if(e.lengthComputable) onProgress(e.loaded / e.total);
+      };
+      xhr.onload = function(){
+        if(xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error("MinIO refused the upload (HTTP " + xhr.status + "). " +
+                              String(xhr.responseText || "").slice(0,200)));
+      };
+      xhr.onerror = function(){
+        reject(new Error("The browser could not reach the NAS at all (network or CORS)."));
+      };
+      xhr.ontimeout = function(){ reject(new Error("Upload timed out.")); };
+      xhr.send(file);
+    });
+  }
+
+  function uploadOne(item){
+    var ctype = contentTypeFor(item.file);
+    item.state.innerHTML = '<span class="pill work">link&hellip;</span>';
+    log("Uploading " + item.key + " (" + kb(item.file.size) + ", " + ctype + ")", "dim");
+
+    return postJson(API, { action:"upload-url", key:item.key, contentType:ctype })
+      .then(function(d){
+        item.state.innerHTML = '<span class="pill work">0%</span>';
+        return putFile(d.url, item.file, ctype, function(frac){
+          var pct = Math.round(frac * 100);
+          item.fill.style.width = pct + "%";
+          item.state.innerHTML = '<span class="pill work">' + pct + '%</span>';
+        });
+      })
+      .then(function(){
+        item.fill.style.width = "100%";
+        item.state.innerHTML = '<span class="pill good">done</span>';
+        log("Stored " + item.key, "ok");
+      })
+      .catch(function(e){
+        item.state.innerHTML = '<span class="pill fail">failed</span>';
+        log(item.key + " — " + e.message, "bad");
+        if(/could not reach|CORS/i.test(e.message)){
+          log("Either this device cannot resolve the NAS address, or MinIO is refusing uploads from this website.", "bad");
+        }
+        throw e;
+      });
+  }
+
+  btnUp.addEventListener("click", function(){
+    if(!queue.length) return;
+    btnUp.disabled = true;
+
+    var failed = 0;
+    // One at a time — a home uplink does not like four at once.
+    var chain = Promise.resolve();
+    queue.forEach(function(item){
+      chain = chain.then(function(){
+        return uploadOne(item).catch(function(){ failed++; });
+      });
+    });
+
+    chain.then(function(){
+      if(failed === 0) log("All " + queue.length + " file(s) uploaded.", "ok");
+      else log(failed + " of " + queue.length + " file(s) failed.", "bad");
+      btnUp.disabled = false;
+    });
+  });
+
+  /* ---------------- list ---------------- */
+
+  document.getElementById("btnList").addEventListener("click", function(){
+    var out = document.getElementById("listStatus");
+    var f = folder();
+    listWrap.innerHTML = "";
+    pill(out, "work", "Reading\u2026");
+    log("Listing " + f, "dim");
+
+    postJson(API, { action:"list", prefix:f })
+      .then(function(d){
+        lastListed = d.files.map(function(x){ return x.key; });
+        if(!d.files.length){
+          pill(out, "fail", "Empty");
+          log("Nothing in " + f + " yet.", "dim");
+          return;
+        }
+        pill(out, "good", d.files.length + " file(s)");
+        var t = document.createElement("table");
+        t.innerHTML = "<tr><th>Key</th><th>Size</th><th>Updated</th></tr>";
+        d.files.forEach(function(x){
+          var tr = document.createElement("tr");
+          var a = document.createElement("td"); a.className = "k"; a.textContent = x.key;
+          var b = document.createElement("td"); b.className = "n"; b.textContent = kb(x.size);
+          var c = document.createElement("td"); c.className = "n";
+          c.textContent = x.updated ? new Date(x.updated).toLocaleString() : "";
+          tr.appendChild(a); tr.appendChild(b); tr.appendChild(c);
+          t.appendChild(tr);
+        });
+        listWrap.appendChild(t);
+        log("Found " + d.files.length + " file(s) in " + f, "ok");
+      })
+      .catch(function(e){
+        pill(out, "fail", "Failed");
+        log(e.message, "bad");
+      });
+  });
+
+  /* ---------------- reachability from this device ---------------- */
+
+  document.getElementById("btnReach").addEventListener("click", function(){
+    var out = document.getElementById("reachStatus");
+    var f = folder();
+    pill(out, "work", "Testing\u2026");
+    log("Reachability test: asking Vercel for the file list in " + f, "dim");
+
+    postJson(API, { action:"list", prefix:f })
+      .then(function(d){
+        if(!d.files.length) throw new Error("No files in " + f + " to test with. Upload one first.");
+        // Smallest file, so a phone on cellular is not punished for it.
+        var smallest = d.files.slice().sort(function(a,b){ return a.size - b.size; })[0];
+        log("Vercel reached the NAS fine. Testing " + smallest.key + " (" + kb(smallest.size) + ") from THIS browser.", "ok");
+        return postJson(API, { action:"view-urls", keys:[smallest.key] }).then(function(v){
+          var url = v.urls[smallest.key];
+          if(!url) throw new Error("No signed link came back for " + smallest.key);
+          var started = Date.now();
+          return fetch(url).then(function(r){
+            if(!r.ok) throw new Error("NAS answered HTTP " + r.status);
+            return r.blob().then(function(blob){
+              var secs = ((Date.now() - started)/1000).toFixed(1);
+              pill(out, "good", "This device CAN reach the NAS");
+              log("Downloaded " + kb(blob.size) + " directly from the NAS in " + secs + "s.", "ok");
+              log("Browser-to-NAS works on this device and network.", "ok");
+            });
+          });
+        });
+      })
+      .catch(function(e){
+        pill(out, "fail", "This device CANNOT reach the NAS");
+        log(e.message, "bad");
+        log("Vercel can talk to the NAS, but this browser cannot fetch from it directly. " +
+            "On cellular this usually means the carrier's DNS will not resolve the ts.net address.", "bad");
+      });
+  });
+
+  document.getElementById("btnClearLog").addEventListener("click", function(){
+    logEl.innerHTML = '<span class="dim">Cleared.</span>';
+  });
+
+  refreshKeyPreview();
+})();
+</script>
+</body>
+</html>
