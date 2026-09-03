@@ -1370,6 +1370,153 @@
   var CATALOG_FILE = '_catalog/catalog.json';
   var sb = (window.supabase &amp;&amp; window.supabase.createClient) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
+  /* ===== Design images on the NAS (MinIO) =====
+     A design's 'png' field used to hold the whole image as a data: URL, which
+     is what made catalog.json 29 MB. It may now instead hold a storage key
+     such as &quot;_designs/d12ab.webp&quot;. Both are understood everywhere, so the
+     catalog keeps working while designs are still half-migrated. New images
+     are always written to the NAS. */
+  var NAS_PREFIX  = '_designs/';
+  var NAS_API     = (function(){
+    try{ return window.top.location.origin + '/api/minio-file'; }
+    catch(e){ return 'https://tools.brochcustom.com/api/minio-file'; }
+  })();
+  var nasUrlCache = {};        // storage key -&gt; signed link, for this visit
+  var NAS_BATCH   = 500;       // the API's own ceiling per call
+
+  function isNasKey(v){
+    return typeof v === 'string' &amp;&amp; v.indexOf(NAS_PREFIX) === 0;
+  }
+  function nasCall(payload){
+    return fetch(NAS_API, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    }).then(function(r){
+      return r.text().then(function(txt){
+        var d;
+        try{ d = JSON.parse(txt); }
+        catch(e){ throw new Error('Storage server error (HTTP '+r.status+')'); }
+        if(!d.ok) throw new Error(d.message || d.error || 'Storage request failed');
+        return d;
+      });
+    });
+  }
+  // Resolve many keys at once and remember them; one call covers a whole view.
+  function nasLinks(keys){
+    var need = [], seen = {};
+    keys.forEach(function(k){
+      if(!isNasKey(k) || nasUrlCache[k] || seen[k]) return;
+      seen[k] = true; need.push(k);
+    });
+    if(!need.length) return Promise.resolve(nasUrlCache);
+    var batches = [];
+    for(var i = 0; i &lt; need.length; i += NAS_BATCH) batches.push(need.slice(i, i + NAS_BATCH));
+    return Promise.all(batches.map(function(b){
+      return nasCall({ action:'view-urls', keys:b }).then(function(d){
+        Object.keys(d.urls || {}).forEach(function(k){ nasUrlCache[k] = d.urls[k]; });
+      });
+    })).then(function(){ return nasUrlCache; });
+  }
+  function dataUrlToBlob(u){
+    var comma = u.indexOf(',');
+    var head  = u.slice(0, comma);
+    var mime  = (head.match(/data:([^;,]+)/) || [])[1] || 'application/octet-stream';
+    var body  = u.slice(comma + 1);
+    if(head.indexOf(';base64') &lt; 0) return new Blob([decodeURIComponent(body)], {type:mime});
+    var bin = atob(body), n = bin.length, arr = new Uint8Array(n);
+    for(var i = 0; i &lt; n; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], {type:mime});
+  }
+  function extForMime(m){
+    if(!m) return 'bin';
+    if(m.indexOf('webp') &gt;= 0) return 'webp';
+    if(m.indexOf('jpeg') &gt;= 0 || m.indexOf('jpg') &gt;= 0) return 'jpg';
+    if(m.indexOf('png')  &gt;= 0) return 'png';
+    if(m.indexOf('svg')  &gt;= 0) return 'svg';
+    return 'bin';
+  }
+  // Store one design's image on the NAS. Resolves to the storage key.
+  function nasPutDesign(id, dataUrl){
+    var blob = dataUrlToBlob(dataUrl);
+    var key  = NAS_PREFIX + id + '.' + extForMime(blob.type);
+    return nasCall({ action:'upload-url', key:key, contentType: blob.type || 'application/octet-stream' })
+      .then(function(d){
+        return fetch(d.url, { method:'PUT', headers:{'Content-Type': blob.type || 'application/octet-stream'}, body: blob });
+      })
+      .then(function(r){
+        if(!r.ok) throw new Error('Storage refused the image (HTTP '+r.status+')');
+        nasUrlCache[key] = null;    // force a fresh signed link next time it is shown
+        delete nasUrlCache[key];
+        return key;
+      });
+  }
+  // Turn either form back into a data: URL — the mockup window needs real bytes.
+  function nasToDataUrl(v){
+    if(!v) return Promise.resolve(null);
+    if(!isNasKey(v)) return Promise.resolve(v);
+    return nasLinks([v]).then(function(){
+      var u = nasUrlCache[v];
+      if(!u) throw new Error('No storage link for this design');
+      return fetch(u).then(function(r){
+        if(!r.ok) throw new Error('Storage answered HTTP '+r.status);
+        return r.blob();
+      });
+    }).then(function(blob){
+      return new Promise(function(res, rej){
+        var fr = new FileReader();
+        fr.onload  = function(){ res(fr.result); };
+        fr.onerror = function(){ rej(new Error('Could not read the design')); };
+        fr.readAsDataURL(blob);
+      });
+    });
+  }
+  // Build the src attribute for a design image, whichever form it is in.
+  function nasImgSrc(v){
+    if(!v) return 'src=&quot;&quot;';
+    if(!isNasKey(v)) return 'src=&quot;'+v+'&quot;';
+    var u = nasUrlCache[v];
+    return (u ? 'src=&quot;'+u+'&quot; ' : '') + 'data-nas-key=&quot;'+v+'&quot;';
+  }
+  // A folder cover is a CSS background rather than an &lt;img&gt;, so it gets its own pair.
+  function nasCoverStyle(v){
+    if(!v) return '';
+    if(!isNasKey(v)) return ' style=&quot;background-image:url('+v+')&quot;';
+    var u = nasUrlCache[v];
+    return (u ? ' style=&quot;background-image:url('+u+')&quot;' : '') + ' data-nas-cover=&quot;'+v+'&quot;';
+  }
+  function nasHydrateCovers(root){
+    if(!root) return;
+    var els = root.querySelectorAll('[data-nas-cover]');
+    if(!els.length) return;
+    var keys = [];
+    for(var i = 0; i &lt; els.length; i++) keys.push(els[i].getAttribute('data-nas-cover'));
+    nasLinks(keys).then(function(){
+      for(var j = 0; j &lt; els.length; j++){
+        var k = els[j].getAttribute('data-nas-cover');
+        if(nasUrlCache[k]) els[j].style.backgroundImage = 'url(' + nasUrlCache[k] + ')';
+      }
+    }).catch(function(e){ try{ console.warn('Covers could not be loaded from storage', e); }catch(_){} });
+  }
+
+  // After any HTML is written, point NAS-backed images at their signed links.
+  function nasHydrate(root){
+    if(!root) return;
+    var els = root.querySelectorAll('img[data-nas-key]');
+    if(!els.length) return;
+    var keys = [];
+    for(var i = 0; i &lt; els.length; i++) keys.push(els[i].getAttribute('data-nas-key'));
+    nasLinks(keys).then(function(){
+      for(var j = 0; j &lt; els.length; j++){
+        var k = els[j].getAttribute('data-nas-key');
+        if(nasUrlCache[k]) els[j].src = nasUrlCache[k];
+      }
+    }).catch(function(e){
+      try{ console.warn('Design images could not be loaded from storage', e); }catch(_){}
+      toast('Design images unavailable \u2014 the NAS may be offline');
+    });
+  }
+
   var _saveTimer = null;
   var _loaded = false;   // becomes true once initial load completes (prevents save-before-load)
 
@@ -1699,7 +1846,17 @@
         // SVGs are rasterized (vector discarded) so customers can't grab production art.
         var src$=(ext===&quot;svg&quot;)? readSvg(it.file) : compressImage(it.file);
         (function(dd, hash){
-          work.push(src$.then(function(src){ if(src){ dd.png=src; dd.pngHash=hash; } }));
+          // the image goes to the NAS; the catalog keeps only the storage key
+          work.push(src$.then(function(src){
+            if(!src) return;
+            return nasPutDesign(dd.id, src).then(function(key){
+              dd.png=key; dd.pngHash=hash;
+            }).catch(function(e){
+              try{ console.warn('Design upload to storage failed', e); }catch(_){}
+              dd.png=src; dd.pngHash=hash;   // keep it inline rather than lose the design
+              toast('Storage unavailable \u2014 that design stayed in the catalog file');
+            });
+          }));
         })(d, it.hash);
       });
       Promise.all(work).then(function(){
@@ -1721,7 +1878,18 @@
   });
 
   function setCoverFile(folderId,file){
-    compressImage(file, 700).then(function(src){ if(src){ var f=folderById(folderId); if(f){ f.cover=src; render(); persist(); toast(&quot;Cover set&quot;); } } });
+    compressImage(file, 700).then(function(src){
+      if(!src) return;
+      var f=folderById(folderId); if(!f) return;
+      // covers go to the NAS too; the catalog keeps only the key
+      nasPutDesign('covers/'+folderId, src).then(function(key){ f.cover=key; })
+        .catch(function(e){
+          try{ console.warn('Cover upload to storage failed', e); }catch(_){}
+          f.cover=src;   // keep it inline rather than lose the cover
+          toast('Storage unavailable \u2014 that cover stayed in the catalog file');
+        })
+        .then(function(){ render(); persist(); toast(&quot;Cover set&quot;); });
+    });
   }
 
   // ---------- render ----------
@@ -1779,7 +1947,7 @@
         var n=folderDesigns(f.id).length;
         var has=!!f.cover, off=!f.active;
         html+='&lt;div class=&quot;cat-card '+(has?&quot;has-cover &quot;:&quot;&quot;)+(off?&quot;off&quot;:&quot;&quot;)+'&quot; data-open=&quot;'+f.id+'&quot;&gt;';
-        if(has){ html+='&lt;div class=&quot;cover&quot; style=&quot;background-image:url('+f.cover+')&quot;&gt;&lt;/div&gt;&lt;div class=&quot;cover-grad&quot;&gt;&lt;/div&gt;'; }
+        if(has){ html+='&lt;div class=&quot;cover&quot;'+nasCoverStyle(f.cover)+'&gt;&lt;/div&gt;&lt;div class=&quot;cover-grad&quot;&gt;&lt;/div&gt;'; }
         if(off) html+='&lt;span class=&quot;hidden-pill&quot;&gt;Hidden&lt;/span&gt;';
         if(!has &amp;&amp; f.emoji) html+='&lt;span class=&quot;leaf&quot;&gt;'+esc(f.emoji)+'&lt;/span&gt;';
         var meta = n?(n+&quot; design&quot;+(n===1?&quot;&quot;:&quot;s&quot;)):&quot;No designs yet&quot;;
@@ -1813,7 +1981,7 @@
         html+='&lt;div class=&quot;design-grid&quot;&gt;';
         shown.forEach(function(d){
           var src=d.png||d.svg;
-          html+='&lt;div class=&quot;tile&quot;&gt;&lt;div class=&quot;thumb&quot; data-zoom=&quot;'+d.id+'&quot;&gt;'+(src?'&lt;img src=&quot;'+src+'&quot; alt=&quot;Design&quot; draggable=&quot;false&quot; oncontextmenu=&quot;return false&quot; style=&quot;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;&quot;&gt;':'&lt;span class=&quot;label&quot; style=&quot;color:var(--burgundy);font-size:18px&quot;&gt;No image&lt;/span&gt;')+'&lt;/div&gt;';
+          html+='&lt;div class=&quot;tile&quot;&gt;&lt;div class=&quot;thumb&quot; data-zoom=&quot;'+d.id+'&quot;&gt;'+(src?'&lt;img '+nasImgSrc(src)+' alt=&quot;Design&quot; draggable=&quot;false&quot; oncontextmenu=&quot;return false&quot; style=&quot;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;&quot;&gt;':'&lt;span class=&quot;label&quot; style=&quot;color:var(--burgundy);font-size:18px&quot;&gt;No image&lt;/span&gt;')+'&lt;/div&gt;';
           var mb=&quot;&quot;;
           if(hasTag(d,&quot;print&quot;)) mb+='&lt;span class=&quot;badge print&quot;&gt;Print Design&lt;/span&gt;';
           if(hasTag(d,&quot;embroidery&quot;)) mb+='&lt;span class=&quot;badge emb&quot;&gt;Embroidery&lt;/span&gt;';
@@ -1844,6 +2012,8 @@
     }
 
     app.innerHTML=html;
+    nasHydrate(app);
+    nasHydrateCovers(app);
     wire();
   }
 
@@ -1930,17 +2100,28 @@
   var mockupEnabled = false;
   var MOCKUP_URL = (function(){ try{ return window.top.location.origin + &quot;/model.html&quot;; }catch(e){ return &quot;https://tools.brochcustom.com/model.html&quot;; } })();
 
-  function sendToMockup(dataURL){
+  function sendToMockup(src){
     if(!mockupEnabled){ toast(&quot;Mockup tool is temporarily unavailable&quot;); return; }
-    if(!dataURL){ toast(&quot;No image to preview&quot;); return; }
+    if(!src){ toast(&quot;No image to preview&quot;); return; }
     // open the mockup in the click handler (popup blockers), then send the design once it's READY
     var win = window.open(MOCKUP_URL, &quot;_blank&quot;);
     if(!win){ toast(&quot;Allow popups to use the mockup&quot;); return; }
+    // the image may live on the NAS now, so fetch the real bytes back first
+    var dataP = nasToDataUrl(src).catch(function(e){
+      toast(&quot;Couldn't load that design from storage&quot;);
+      try{ console.warn('sendToMockup', e); }catch(_){}
+      return null;
+    });
     var sent = false;
     function onMsg(e){
       if(e.data &amp;&amp; e.data.type === &quot;BROCH_MOCKUP_READY&quot; &amp;&amp; !sent){
-        try{ e.source.postMessage({ type: &quot;BROCH_DESIGN&quot;, image: dataURL }, &quot;*&quot;); sent = true; }catch(err){}
+        sent = true;
+        var target = e.source;
         window.removeEventListener(&quot;message&quot;, onMsg);
+        dataP.then(function(dataURL){
+          if(!dataURL) return;
+          try{ target.postMessage({ type: &quot;BROCH_DESIGN&quot;, image: dataURL }, &quot;*&quot;); }catch(err){}
+        });
       }
     }
     window.addEventListener(&quot;message&quot;, onMsg);
@@ -1948,7 +2129,10 @@
     setTimeout(function(){
       if(!sent){
         window.removeEventListener(&quot;message&quot;, onMsg);
-        try{ win.location.href = MOCKUP_URL + &quot;#design=&quot; + encodeURIComponent(dataURL); }catch(err){}
+        dataP.then(function(dataURL){
+          if(!dataURL) return;
+          try{ win.location.href = MOCKUP_URL + &quot;#design=&quot; + encodeURIComponent(dataURL); }catch(err){}
+        });
       }
     }, 4000);
   }
@@ -1962,7 +2146,7 @@
     var ov=document.createElement(&quot;div&quot;); ov.className=&quot;lightbox&quot;;
     // oncontextmenu/draggable off = makes casual right-click/long-press &quot;Save image&quot; less convenient
     ov.innerHTML='&lt;button class=&quot;lb-close&quot; aria-label=&quot;Close&quot;&gt;\u00d7&lt;/button&gt;'+
-      '&lt;div class=&quot;lb-img&quot;&gt;&lt;img src=&quot;'+src+'&quot; alt=&quot;Design&quot; draggable=&quot;false&quot; oncontextmenu=&quot;return false&quot; style=&quot;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;pointer-events:none;&quot;&gt;&lt;/div&gt;'+
+      '&lt;div class=&quot;lb-img&quot;&gt;&lt;img '+nasImgSrc(src)+' alt=&quot;Design&quot; draggable=&quot;false&quot; oncontextmenu=&quot;return false&quot; style=&quot;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;pointer-events:none;&quot;&gt;&lt;/div&gt;'+
       (caption?'&lt;div class=&quot;lb-name&quot;&gt;'+caption+'&lt;/div&gt;':'')+
       (mockupEnabled?'&lt;button class=&quot;lb-mockup&quot; type=&quot;button&quot;&gt;See on a mockup&lt;/button&gt;':'');
     ov.addEventListener(&quot;click&quot;,function(e){
@@ -1970,6 +2154,7 @@
       if(e.target===ov||e.target.classList.contains(&quot;lb-close&quot;)) document.body.removeChild(ov);
     });
     document.body.appendChild(ov);
+    nasHydrate(ov);
   }
 
   function mkOverlay(){ var ov=document.createElement(&quot;div&quot;); ov.className=&quot;overlay&quot;; ov.innerHTML='&lt;div class=&quot;sheet&quot;&gt;&lt;/div&gt;'; ov.addEventListener(&quot;click&quot;,function(e){ if(e.target===ov) document.body.removeChild(ov); }); document.body.appendChild(ov); return ov; }
@@ -2227,17 +2412,25 @@ function bcSaveDST(){
       var d=state.designs.find(function(x){return x.folderId===fid &amp;&amp; x.key===k;});
       if(!d){ d={id:uid('d'),folderId:fid,key:k,name:prettify(nm),tags:['embroidery'],png:null,svg:null,pngHash:null,svgHash:null}; state.designs.push(d); }
       else { d.tags=['embroidery']; }
-      d.png=png; d.pngHash=uid('h');
+      d.pngHash=uid('h');
       // make sure the view is showing the folder we just saved into
       if(curId()!==fid){ state.path=[fid]; }
       if(state.filter &amp;&amp; state.filter!=='all' &amp;&amp; state.filter!=='embroidery') state.filter='all';
       document.getElementById('dstColorOverlay').classList.remove('show');
-      _dstPending=null; _dstSaving=false;
-      if(btn){ btn.textContent='Save as embroidery'; btn.disabled=false; }
-      render();
-      _bcVerifyId=d.id;        // verify THIS design really lands in the cloud file
-      bcSaveCatalogNow();
-      _dstNext();
+      _dstPending=null;
+      // the stitch render goes to the NAS; only the key is kept in the catalog
+      nasPutDesign(d.id, png).then(function(key){ d.png=key; }).catch(function(e){
+        try{ console.warn('DST image upload to storage failed', e); }catch(_){}
+        d.png=png;   // keep it inline rather than lose the design
+        toast('Storage unavailable \u2014 that design stayed in the catalog file');
+      }).then(function(){
+        _dstSaving=false;
+        if(btn){ btn.textContent='Save as embroidery'; btn.disabled=false; }
+        render();
+        _bcVerifyId=d.id;        // verify THIS design really lands in the cloud file
+        bcSaveCatalogNow();
+        _dstNext();
+      });
     }catch(e){
       _dstSaving=false;
       if(btn){ btn.textContent='Save as embroidery'; btn.disabled=false; }
