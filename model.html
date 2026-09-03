@@ -302,6 +302,7 @@
     <div class="shareCard">
       <div class="shareCardTitle">Share this mockup</div>
       <button class="shareOpt" id="optPng" type="button"><span>Download image</span><small>A PNG photo of this view</small></button>
+      <button class="shareOpt" id="optVideo" type="button"><span>Record spin video</span><small>5 seconds, front and back — sends as a video on WhatsApp</small></button>
       <button class="shareOpt" id="optLink" type="button"><span>Make a shareable file</span><small>A small file they open to spin it — sends over email, WhatsApp, or Drive</small></button>
       <button class="shareCancel" id="optCancel" type="button">Cancel</button>
     </div>
@@ -4095,9 +4096,13 @@ three/build/three.module.js:
       VIEWER=true; document.body.classList.add("viewer"); awaitingShare=true; return;
     }
     var hash=(location.hash||"").replace(/^#/,""); if(!hash) return;
-    // short shared link: just a saved-mockup id (letters/numbers, no = or &) -> fetch it, open locked
+    // Old short links pointed at a database that no longer exists. Open the
+    // builder normally rather than leaving someone on a blank screen.
     if(/^[A-Za-z0-9]{8,}$/.test(hash)){
-      VIEWER=true; document.body.classList.add("viewer"); awaitingShare=true; loadMockupById(hash); return;
+      setTimeout(function(){
+        toast("That mockup link is no longer available \u2014 here is the builder instead",8000);
+      }, 1500);   // wait for the builder to finish booting, or the message is wiped
+      return;
     }
     var p={}; hash.split("&").forEach(function(kv){ var i=kv.indexOf("="); if(i>0) p[kv.slice(0,i)]=kv.slice(i+1); });
     if(p.m){ try{ var st=JSON.parse(decodeURIComponent(p.m)); pendingMockup=st; bootType=st.t||null; VIEWER=true; document.body.classList.add("viewer"); }
@@ -4159,40 +4164,88 @@ three/build/three.module.js:
     if(out.slice(0,15)!=="data:image/webp") out=c.toDataURL("image/png");
     return out;
   }
-  // ---- Supabase: store each shared mockup so the link can be short (instead of cramming everything into the URL) ----
-  var SB_URL="https://lpzbwndambexmippzhgx.supabase.co";
-  var SB_KEY="sb_publishable_AcWoAkaOqTmSh8zclaSF4w_snUOb_Tr";
-  function shortId(){
-    var ch="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", s="", i, a;
-    if(window.crypto && crypto.getRandomValues){ a=new Uint8Array(12); crypto.getRandomValues(a); for(i=0;i<12;i++) s+=ch[a[i]%62]; }
-    else { for(i=0;i<12;i++) s+=ch[Math.floor(Math.random()*62)]; }
-    return s;
-  }
-  function saveMockup(id, st){
-    return fetch(SB_URL+"/rest/v1/mockups", {
-      method:"POST",
-      headers:{ "apikey":SB_KEY, "Authorization":"Bearer "+SB_KEY, "Content-Type":"application/json", "Prefer":"return=minimal" },
-      body:JSON.stringify({ id:id, data:st })
-    }).then(function(r){ if(!r.ok) return r.text().then(function(t){ throw new Error("HTTP "+r.status+" "+t); }); return true; });
-  }
-  function loadMockupById(id){
-    fetch(SB_URL+"/rest/v1/mockups?id=eq."+encodeURIComponent(id)+"&select=data&apikey="+SB_KEY)
-     .then(function(r){ if(!r.ok) return r.text().then(function(t){ throw new Error(r.status+": "+t.slice(0,160)); }); return r.json(); })
-     .then(function(rows){
-        var st=(rows && rows.length) ? rows[0].data : null;
-        if(!st){ toast("This mockup link wasn't found",6000); loadType("shirt"); return; }
-        pendingMockup=st; bootType=st.t||"shirt"; loadType(bootType);
-     })
-     .catch(function(err){ console.warn("Broch mockup: load failed", err); toast("Load error — "+(err&&err.message?err.message:"no connection"),9000); loadType("shirt"); });
-  }
+  // Shared-mockup links used to be stored in a Supabase table; that is gone.
+  // Sharing is now a recorded video or a self-contained file, so this page
+  // talks to no database at all.
   function shareUrl(url){
-    function copyFallback(){ try{ navigator.clipboard.writeText(url).then(function(){toast("Link copied — paste it to send")},function(){toast("Open the online version to share")}); }
+    function copyFallback(){ try{ navigator.clipboard.writeText(url).then(function(){toast("Link copied \u2014 works for 3 days",5000)},function(){toast("Open the online version to share")}); }
       catch(e){ toast("Open the online version to share"); } }
     if(navigator.share){
-      navigator.share({title:"Broch Custom mockup", text:"Spin this mockup around", url:url})
+      navigator.share({title:"Broch Custom mockup", text:"Spin this mockup around (link works for 3 days)", url:url})
         .catch(function(e){ if(!(e&&e.name==="AbortError")) copyFallback(); });
     }else{ copyFallback(); }
   }
+  /* ---- Record a spinning video of the mockup -------------------------------
+     Captures the 3D canvas directly, so none of the on-screen buttons appear.
+     MP4 where the device supports it, WebM otherwise. */
+  var recSpin=null;
+  function bestVideoType(){
+    if(typeof MediaRecorder==="undefined") return null;
+    var want=["video/mp4;codecs=avc1.42E01E","video/mp4;codecs=avc1","video/mp4",
+              "video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm"];
+    for(var i=0;i<want.length;i++){
+      try{ if(MediaRecorder.isTypeSupported(want[i])) return want[i]; }catch(e){}
+    }
+    return null;
+  }
+  function recordSpin(){
+    if(!current){ toast("Pick a garment first"); return; }
+    if(recSpin){ return; }
+    var mime=bestVideoType();
+    if(!mime || typeof renderer.domElement.captureStream!=="function"){
+      toast("This device can't record video \u2014 try Download image instead",6000); return;
+    }
+    var DUR=5000;
+    var stream, rec, chunks=[];
+    try{ stream=renderer.domElement.captureStream(30); }
+    catch(e){ toast("Couldn't start recording"); return; }
+    try{ rec=new MediaRecorder(stream,{mimeType:mime, videoBitsPerSecond:5000000}); }
+    catch(e){ toast("Couldn't start recording: "+(e&&e.message?e.message:e),6000); return; }
+
+    var ext = mime.indexOf("mp4")>=0 ? "mp4" : "webm";
+    var wasSel=sel, wasHandles=rotHandlesEl?rotHandlesEl.style.display:"";
+    if(rotHandlesEl) rotHandlesEl.style.display="none";
+
+    rec.ondataavailable=function(e){ if(e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop=function(){
+      recSpin=null; yawVel=0;
+      if(rotHandlesEl) rotHandlesEl.style.display=wasHandles;
+      var blob=new Blob(chunks,{type:mime.split(";")[0]});
+      if(!blob.size){ toast("The recording came out empty"); return; }
+      var file;
+      try{ file=new File([blob],"broch-mockup-"+activeType+"."+ext,{type:blob.type}); }
+      catch(e){ file=null; }
+      if(file && navigator.canShare && navigator.share && navigator.canShare({files:[file]})){
+        navigator.share({files:[file], title:"Broch Custom mockup"})
+          .then(function(){ toast("Sent"); })
+          .catch(function(e){
+            if(e && e.name==="AbortError") return;
+            downloadBlob(blob, ext);
+          });
+      } else {
+        downloadBlob(blob, ext);
+      }
+    };
+
+    function downloadBlob(blob, ext){
+      try{
+        var url=URL.createObjectURL(blob);
+        var a=document.createElement("a");
+        a.href=url; a.download="broch-mockup-"+activeType+"."+ext;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function(){ try{URL.revokeObjectURL(url);}catch(e){} },5000);
+        toast("Video saved ("+(blob.size/1048576).toFixed(1)+" MB)",5000);
+      }catch(e){ toast("Couldn't save the video"); }
+    }
+
+    toast("Recording 5 seconds\u2026",5200);
+    recSpin={ t0:performance.now(), dur:DUR, from:yaw };
+    // ask for data every second rather than only at the end; some browsers
+    // hand back nothing at all otherwise
+    rec.start(1000);
+    setTimeout(function(){ try{ rec.stop(); }catch(e){} }, DUR+120);
+  }
+
   function makeShareFile(){
     if(!current){ toast("Pick a garment and add your design first"); return; }
     var LS=serializeLayers();
@@ -4218,20 +4271,6 @@ three/build/three.module.js:
       setTimeout(function(){ try{document.body.removeChild(a);}catch(e){} URL.revokeObjectURL(url); },1000);
       toast("Shareable file saved",2800);
     }catch(e){ toast("Couldn't make the file"); }
-  }
-  function shareMockup(){
-    if(!current) return;
-    var LS=serializeLayers();
-    var l0=LS[0]||{d:"",s:1,r:0,a:null};
-    var st={ t:activeType, c:getColorState(), layers:LS, d:l0.d, s:l0.s, r:l0.r, a:l0.a };
-    var id=shortId();
-    toast("Creating link…");
-    saveMockup(id, st).then(function(){
-      shareUrl(location.origin+location.pathname+"#"+id);
-    }).catch(function(err){
-      console.warn("Broch mockup: save failed", err);
-      toast("Save error — "+(err&&err.message?err.message:"no connection"),9000);
-    });
   }
   // Let whatever opened this mockup (popup window or iframe) know we're loaded and ready to receive a design.
   (function(){
@@ -4413,6 +4452,7 @@ three/build/three.module.js:
   function closeShareMenu(){ var m=$("#shareMenu"); if(m) m.classList.remove("up"); }
   $("#shareBtn").addEventListener("click",function(){ if(current) openShareMenu(); });
   $("#optPng").addEventListener("click",function(){ closeShareMenu(); savePNG(); });
+  $("#optVideo").addEventListener("click",function(){ closeShareMenu(); recordSpin(); });
   $("#optLink").addEventListener("click",function(){ closeShareMenu(); makeShareFile(); });
   $("#optCancel").addEventListener("click",closeShareMenu);
   $("#shareMenu").addEventListener("click",function(e){ if(e.target===this) closeShareMenu(); });
@@ -4542,7 +4582,11 @@ three/build/three.module.js:
   })(rhEls[rhi]); }
   function animate(){
     requestAnimationFrame(animate);
-    if(!dragging){
+    if(recSpin){
+      // one full, even turn while recording, so the video shows front and back
+      var _e=(performance.now()-recSpin.t0)/recSpin.dur;
+      yaw=recSpin.from + Math.PI*2*Math.min(_e,1);
+    } else if(!dragging){
       if(Math.abs(yawVel)>0.0002){ yaw+=yawVel; yawVel*=0.93; }
     }
     if(_needRescale){ _needRescale=false; buildDesign(); }
@@ -4555,7 +4599,7 @@ three/build/three.module.js:
       if(_L.mesh && _L.faceN){ _faceTmp.copy(_L.faceN).applyQuaternion(modelGroup.quaternion); _L.mesh.visible = _faceTmp.z > -0.15; } }
     // keep the rotate handles sitting on the design corners (only while the print is on the visible side)
     if(rotHandlesEl){
-      if(designTex && designMesh && designMesh.visible && designHandlesLocal){
+      if(designTex && designMesh && designMesh.visible && designHandlesLocal && !recSpin){
         for(var hi=0;hi<4;hi++){ if(rhEls[hi]){ var s=localToScreen(designHandlesLocal[hi]);
           rhEls[hi].style.transform='translate('+s.x+'px,'+s.y+'px)'; } }
         rotHandlesEl.style.display='block';
@@ -4579,7 +4623,7 @@ three/build/three.module.js:
     camera.lookAt(0,0,0);
   }
 
-  if(!awaitingShare) loadType(bootType||"shirt");   // when a shared link is loading, loadMockupById picks the model instead
+  if(!awaitingShare) loadType(bootType||"shirt");   // a shared #m= link picks its own model instead
   animate();
 })();
 </script>
