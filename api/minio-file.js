@@ -5,6 +5,7 @@
 // POST { action: "upload-url", key, contentType }  -> { ok, url, key, expiresIn }
 // POST { action: "view-urls",  keys: [ ... ] }     -> { ok, urls: { key: url } }
 // POST { action: "delete", key }                   -> { ok, key }
+// POST { action: "list",    prefix }                -> { ok, files: [ {key,size,updated} ] }
 //
 // Uploads go browser -> MinIO directly, so Vercel's ~4.5MB request limit does
 // not apply to the artwork itself.
@@ -14,6 +15,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -23,7 +25,7 @@ const MAX_KEYS_PER_CALL = 500;
 
 // Only these prefixes may be written to, so a stray call cannot overwrite
 // settings files or other people's folders.
-const ALLOWED_PREFIXES = ['_catalog/', '_designs/', '_fonts/', '_store/', '_orders/'];
+const ALLOWED_PREFIXES = ['_catalog/', '_designs/', '_fonts/', '_share/', '_store/', '_orders/'];
 
 function badKey(key) {
   if (typeof key !== 'string' || !key.length || key.length > 512) return true;
@@ -137,6 +139,36 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, urls, skipped, expiresIn: VIEW_TTL });
     }
 
+    if (action === 'list') {
+      const prefix = typeof body.prefix === 'string' ? body.prefix : '';
+      if (!ALLOWED_PREFIXES.some((p) => p.startsWith(prefix) || prefix.startsWith(p))) {
+        return res.status(400).json({ ok: false, error: 'Disallowed prefix.', prefix });
+      }
+      const files = [];
+      let token;
+      do {
+        const out = await client.send(
+          new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix,
+            MaxKeys: 1000,
+            ContinuationToken: token,
+          })
+        );
+        (out.Contents || []).forEach((o) => {
+          files.push({
+            key: o.Key,
+            size: o.Size,
+            updated: o.LastModified ? new Date(o.LastModified).getTime() : 0,
+          });
+        });
+        token = out.IsTruncated ? out.NextContinuationToken : undefined;
+      } while (token && files.length < 5000);
+
+      files.sort((a, b) => b.updated - a.updated);
+      return res.status(200).json({ ok: true, prefix, files });
+    }
+
     if (action === 'delete') {
       const key = body.key;
       if (badKey(key)) {
@@ -149,7 +181,7 @@ export default async function handler(req, res) {
     return res.status(400).json({
       ok: false,
       error: 'Unknown action.',
-      allowed: ['upload-url', 'view-urls', 'delete'],
+      allowed: ['upload-url', 'view-urls', 'list', 'delete'],
     });
   } catch (err) {
     return res.status(500).json({
