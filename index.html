@@ -3783,6 +3783,84 @@ document.addEventListener('DOMContentLoaded', function() {
 
   var client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+  /* ===================================================================
+     File sharing now lives on the Synology NAS (MinIO), not Supabase.
+     'share' below offers the same five methods the file-share code
+     already used, so the rest of this section is unchanged. Fonts,
+     the catalog and settings still use Supabase via 'client'.
+     =================================================================== */
+  var SHARE_PREFIX = '_share/';
+  var share = (function(){
+    var API = '/api/minio-file';
+
+    function call(payload){
+      return fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function(r){
+        return r.text().then(function(txt){
+          var d;
+          try { d = JSON.parse(txt); }
+          catch(e){ throw new Error('Storage server error (HTTP ' + r.status + ')'); }
+          if(!d.ok) throw new Error(d.message || d.error || 'Storage request failed');
+          return d;
+        });
+      });
+    }
+    function full(name){ return name.indexOf(SHARE_PREFIX)===0 ? name : SHARE_PREFIX + name; }
+    function bare(key){ return key.indexOf(SHARE_PREFIX)===0 ? key.slice(SHARE_PREFIX.length) : key; }
+    function fail(e){ return { data:null, error:{ message:(e && e.message) || 'Storage error' } }; }
+
+    return {
+      list: function(){
+        return call({ action:'list', prefix: SHARE_PREFIX }).then(function(d){
+          return { data: d.files.map(function(f){
+            return { name: bare(f.key), size: f.size, created_at: new Date(f.updated).toISOString() };
+          }), error:null };
+        }).catch(fail);
+      },
+      download: function(name){
+        return call({ action:'view-urls', keys:[ full(name) ] }).then(function(d){
+          var url = d.urls[ full(name) ];
+          if(!url) throw new Error('File not found');
+          return fetch(url).then(function(r){
+            if(!r.ok) throw new Error('Download failed (HTTP ' + r.status + ')');
+            return r.blob();
+          });
+        }).then(function(blob){ return { data: blob, error:null }; }).catch(fail);
+      },
+      upload: function(name, file){
+        return call({
+          action:'upload-url',
+          key: full(name),
+          contentType: (file && file.type) || 'application/octet-stream'
+        }).then(function(d){
+          return fetch(d.url, {
+            method:'PUT',
+            headers:{ 'Content-Type': (file && file.type) || 'application/octet-stream' },
+            body: file
+          });
+        }).then(function(r){
+          if(!r.ok) throw new Error('Upload refused by storage (HTTP ' + r.status + ')');
+          return { data:{ path: full(name) }, error:null };
+        }).catch(fail);
+      },
+      remove: function(names){
+        var list = [].concat(names);
+        return Promise.all(list.map(function(n){ return call({ action:'delete', key: full(n) }); }))
+          .then(function(){ return { data:{}, error:null }; }).catch(fail);
+      },
+      createSignedUrl: function(name){
+        return call({ action:'view-urls', keys:[ full(name) ] }).then(function(d){
+          var url = d.urls[ full(name) ];
+          if(!url) throw new Error('File not found');
+          return { data:{ signedUrl: url }, error:null };
+        }).catch(fail);
+      }
+    };
+  })();
+
   var dropZone     = document.getElementById('tab-files');   // the WHOLE tab accepts drops
   var fileInput    = document.getElementById('fileInput');
 
@@ -4071,7 +4149,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('viewerName').textContent = displayName;
     document.getElementById('viewerOverlay').classList.add('show');
     if (btn) btn.classList.add('busy');
-    client.storage.from(BUCKET).download(fileName).then(function(result) {
+    share.download(fileName).then(function(result) {
       if (btn) btn.classList.remove('busy');
       if (result.error || !result.data) { alert('Could not load that file.'); return; }
       result.data.arrayBuffer().then(function(buf) {
@@ -4098,7 +4176,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var ext = displayName.split('.').pop().toLowerCase();
     var origText = btn.innerHTML;
     btn.classList.add('busy');
-    client.storage.from(BUCKET).createSignedUrl(fileName, 7200).then(function(result) {
+    share.createSignedUrl(fileName).then(function(result) {
       btn.classList.remove('busy');
       if (result.error || !result.data) {
         btn.innerHTML = origText;
@@ -4170,8 +4248,9 @@ document.addEventListener('DOMContentLoaded', function() {
   function uploadFile(file, callback) {
     progressWrap.style.display = 'block';
     statusEl.textContent = 'Uploading ' + file.name + '...';
-    var fileName = Date.now() + '_' + file.name;
-    client.storage.from(BUCKET).upload(fileName, file).then(function(result) {
+    // keep the name storage-safe: slashes and quotes are not valid in object keys
+    var fileName = Date.now() + '_' + String(file.name).replace(/[\/\\"'?#]+/g, '_').replace(/\.{2,}/g, '.');
+    share.upload(fileName, file).then(function(result) {
       progressWrap.style.display = 'none';
       if (result.error) {
         statusEl.textContent = 'Failed: ' + result.error.message;
@@ -4254,7 +4333,7 @@ document.addEventListener('DOMContentLoaded', function() {
         (function(name) {
           RUNNING++;
           if (_thumbCache[name]) { setThumb(name, _thumbCache[name]); RUNNING--; next(); return; }
-          client.storage.from(BUCKET).download(name).then(function(result) {
+          share.download(name).then(function(result) {
             if (result.error || !result.data) { RUNNING--; next(); return; }
             var ext = name.replace(/^\d+_/, '').split('.').pop().toLowerCase();
             if (ext === 'dst') {
@@ -4288,7 +4367,7 @@ document.addEventListener('DOMContentLoaded', function() {
   function copyImageToClipboard(fileName, btn) {
     var orig = btn.innerHTML;
     btn.classList.add('busy');
-    client.storage.from(BUCKET).download(fileName).then(function(result) {
+    share.download(fileName).then(function(result) {
       if (result.error || !result.data) throw new Error('download');
       var blob = result.data;
       var toPng = (blob.type === 'image/png')
@@ -4327,7 +4406,7 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function loadFiles(force) {
-    client.storage.from(BUCKET).list('', { limit: 1000, sortBy: { column: 'created_at', order: 'desc' } }).then(function(result) {
+    share.list().then(function(result) {
       if (result.error || !result.data) {
         fileList.innerHTML = '';
         fileList.appendChild(makeUploadCard());
@@ -4429,7 +4508,7 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function downloadFile(fileName, displayName) {
-    client.storage.from(BUCKET).download(fileName).then(function(result) {
+    share.download(fileName).then(function(result) {
       if (result.error) { alert('Download failed'); return; }
       var url = URL.createObjectURL(result.data);
       var a = document.createElement('a');
@@ -4441,7 +4520,7 @@ document.addEventListener('DOMContentLoaded', function() {
   function shareFile(fileName, displayName, btn) {
     if (!navigator.share) { alert('Sharing is not supported on this browser.'); return; }
     btn.disabled = true; btn.classList.add('busy');
-    client.storage.from(BUCKET).download(fileName).then(function(result) {
+    share.download(fileName).then(function(result) {
       if (result.error) { alert('Share failed'); btn.disabled = false; btn.classList.remove('busy'); return; }
       var file = new File([result.data], displayName, { type: result.data.type || 'application/octet-stream' });
       navigator.share({ files: [file], title: displayName })
@@ -4453,7 +4532,7 @@ document.addEventListener('DOMContentLoaded', function() {
   function deleteFile(fileName, displayName, item) {
     if (!confirm('Delete "' + displayName + '"? This cannot be undone.')) return;
     item.style.opacity = '0'; item.style.transition = 'opacity 0.3s';
-    client.storage.from(BUCKET).remove([fileName]).then(function(result) {
+    share.remove([fileName]).then(function(result) {
       if (result.error) { item.style.opacity = '1'; alert('Delete failed'); return; }
       setTimeout(function() { item.remove(); loadFiles(); }, 300);
     });
@@ -4462,7 +4541,7 @@ document.addEventListener('DOMContentLoaded', function() {
   function copyFileLink(fileName, displayName, btn) {
     var orig = btn.innerHTML;
     btn.classList.add('busy');
-    client.storage.from(BUCKET).createSignedUrl(fileName, 604800).then(function(result) {
+    share.createSignedUrl(fileName).then(function(result) {
       btn.classList.remove('busy');
       if (result.error || !result.data) {
         btn.innerHTML = '!';
@@ -4508,7 +4587,7 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
 
-    client.storage.from(BUCKET).download(fileName).then(function(result) {
+    share.download(fileName).then(function(result) {
       if (result.error) {
         previewBody.innerHTML = '<div class="no-preview"><span class="big-mark">!</span><p>Preview failed</p></div>';
         return;
