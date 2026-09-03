@@ -62,12 +62,13 @@
     box-shadow: 0 2px 12px rgba(22,56,41,0.15);
   }
   /* ── shared footer (same in the shop, the orders app and the tools app) ── */
-  html, body{ min-height:100%; }
-  body{ display:flex; flex-direction:column; min-height:100vh; }
-  body > footer.bc-foot{ margin-top:auto; }
+  /* Sticky footer without turning body into a flex container: that would make
+     block children shrink to their content and squeeze the page. */
+  body{ min-height:100vh; box-sizing:border-box; padding-bottom:118px; position:relative; }
+  body > footer.bc-foot{ position:absolute; left:0; right:0; bottom:0; margin-top:0; }
   .bc-foot{ background:#163829; color:rgba(242,234,221,.82); text-align:center;
     padding:28px 20px; margin-top:50px; display:flex; flex-direction:column; align-items:center; gap:6px;
-    font-family:'EB Garamond',Georgia,serif; font-size:14px; }
+    font-family:'Teko','Oswald',sans-serif; letter-spacing:.04em; font-size:16px; }
   .bc-foot a{ color:#F4B5B0; text-decoration:none; }
   .bc-foot a:hover{ color:#F2EADD; }
   .bc-foot .bc-fine{ font-style:italic; font-size:12px; opacity:.6; }
