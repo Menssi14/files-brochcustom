@@ -62,6 +62,9 @@
     box-shadow: 0 2px 12px rgba(22,56,41,0.15);
   }
   /* ── shared footer (same in the shop, the orders app and the tools app) ── */
+  html, body{ min-height:100%; }
+  body{ display:flex; flex-direction:column; min-height:100vh; }
+  body > footer.bc-foot{ margin-top:auto; }
   .bc-foot{ background:#163829; color:rgba(242,234,221,.82); text-align:center;
     padding:28px 20px; margin-top:50px; display:flex; flex-direction:column; align-items:center; gap:6px;
     font-family:'EB Garamond',Georgia,serif; font-size:14px; }
@@ -382,6 +385,27 @@
   .file-item:hover .file-actions { opacity: 1; }
   @media (hover: none) { .file-actions { opacity: 1; background: none; position: static; padding: 4px 6px 0 !important; } }
   .fbtn { width: 30px; height: 30px; border-radius: 9px; }
+  /* On touch screens the buttons must be big enough to hit reliably, must not
+     run off the edge, and Delete must not sit next to Download.
+     Width is included because some phone browsers still report hover support. */
+  @media (hover: none), (max-width: 700px) {
+    /* Buttons sit below the picture instead of floating over it, so nothing
+       gets clipped by the narrow card. */
+    /* stack picture above buttons instead of side by side */
+    .file-figure { flex-direction: column; height: auto; }
+    .file-figure .file-thumb { height: 130px; width: 100%; }
+    .file-figure .file-icon { height: 130px; display: flex; align-items: center; }
+    .file-actions { position: static; opacity: 1; background: none;
+                    flex-wrap: wrap; gap: 6px; padding: 8px 8px 2px !important;
+                    justify-content: center; width: 100%; box-sizing: border-box; }
+    /* Each button fills half the card: a much bigger target than 30px square. */
+    .fbtn { flex: 1 1 calc(50% - 6px); width: auto; min-width: 0; height: 44px;
+            border-radius: 12px; }
+    .fbtn svg { width: 20px; height: 20px; }
+    /* Delete gets its own full-width row, well clear of Download, so a
+       slightly off-target tap can never destroy a file. */
+    .fbtn.danger { flex: 0 0 100%; margin-top: 4px; border-color: rgba(192,85,74,.45); }
+  }
   .file-name { padding: 0 10px; }
   .file-meta { padding: 0 10px; }
   .upload-card { min-height: 208px; }
@@ -3816,7 +3840,9 @@ document.addEventListener('DOMContentLoaded', function() {
       list: function(){
         return call({ action:'list', prefix: SHARE_PREFIX }).then(function(d){
           return { data: d.files.map(function(f){
-            return { name: bare(f.key), size: f.size, created_at: new Date(f.updated).toISOString() };
+            // 'metadata.size' is the shape the file rows already read from
+            return { name: bare(f.key), size: f.size, metadata: { size: f.size },
+                     created_at: new Date(f.updated).toISOString() };
           }), error:null };
         }).catch(fail);
       },
