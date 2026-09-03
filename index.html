@@ -387,8 +387,8 @@
   .fbtn { width: 30px; height: 30px; border-radius: 9px; }
   /* On touch screens the buttons must be big enough to hit reliably, must not
      run off the edge, and Delete must not sit next to Download.
-     Width is included because some phone browsers still report hover support. */
-  @media (hover: none), (max-width: 700px) {
+     Width-only, so a desktop window is never affected. */
+  @media (max-width: 700px) {
     /* Buttons sit below the picture instead of floating over it, so nothing
        gets clipped by the narrow card. */
     /* stack picture above buttons instead of side by side */
