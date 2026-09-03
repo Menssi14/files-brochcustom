@@ -4025,6 +4025,74 @@ document.addEventListener('DOMContentLoaded', function() {
      already used, so the rest of this section is unchanged. Fonts,
      the catalog and settings still use Supabase via 'client'.
      =================================================================== */
+  /* Font FILES live on the NAS. The small settings JSON that describes them
+     (font-order.json, font-categories.json) stays on Supabase, because it is
+     tiny and changes constantly. 'fontStore' offers the same shape Supabase
+     returned, so the font code below needed almost no edits. */
+  var FONTS_PREFIX = '_fonts/';
+  var fontStore = (function(){
+    var API = '/api/minio-file';
+    function call(payload){
+      return fetch(API, {
+        method:'POST', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function(r){
+        return r.text().then(function(txt){
+          var d;
+          try { d = JSON.parse(txt); }
+          catch(e){ throw new Error('Storage server error (HTTP ' + r.status + ')'); }
+          if(!d.ok) throw new Error(d.message || d.error || 'Storage request failed');
+          return d;
+        });
+      });
+    }
+    function full(name){ return name.indexOf(FONTS_PREFIX)===0 ? name : FONTS_PREFIX + name; }
+    function bare(key){ return key.indexOf(FONTS_PREFIX)===0 ? key.slice(FONTS_PREFIX.length) : key; }
+    function fail(e){ return { data:null, error:{ message:(e && e.message) || 'Storage error' } }; }
+    function ctype(name){
+      var n = (name || '').toLowerCase();
+      if(n.indexOf('.woff2', n.length-6) !== -1) return 'font/woff2';
+      if(n.indexOf('.woff',  n.length-5) !== -1) return 'font/woff';
+      if(n.indexOf('.ttf',   n.length-4) !== -1) return 'font/ttf';
+      if(n.indexOf('.otf',   n.length-4) !== -1) return 'font/otf';
+      return 'application/octet-stream';
+    }
+    return {
+      list: function(){
+        return call({ action:'list', prefix: FONTS_PREFIX }).then(function(d){
+          return { data: d.files.map(function(f){
+            return { name: bare(f.key), size: f.size, metadata:{ size:f.size },
+                     created_at: new Date(f.updated).toISOString() };
+          }), error:null };
+        }).catch(fail);
+      },
+      download: function(name){
+        return call({ action:'view-urls', keys:[ full(name) ] }).then(function(d){
+          var url = d.urls[ full(name) ];
+          if(!url) throw new Error('Font not found in storage');
+          return fetch(url).then(function(r){
+            if(!r.ok) throw new Error('Download failed (HTTP ' + r.status + ')');
+            return r.blob();
+          });
+        }).then(function(blob){ return { data: blob, error:null }; }).catch(fail);
+      },
+      upload: function(name, file){
+        return call({ action:'upload-url', key: full(name), contentType: ctype(name) })
+          .then(function(d){
+            return fetch(d.url, { method:'PUT', headers:{ 'Content-Type': ctype(name) }, body: file });
+          }).then(function(r){
+            if(!r.ok) throw new Error('Upload refused by storage (HTTP ' + r.status + ')');
+            return { data:{ path: full(name) }, error:null };
+          }).catch(fail);
+      },
+      remove: function(names){
+        var list = [].concat(names);
+        return Promise.all(list.map(function(n){ return call({ action:'delete', key: full(n) }); }))
+          .then(function(){ return { data:{}, error:null }; }).catch(fail);
+      }
+    };
+  })();
+
   var SHARE_PREFIX = '_share/';
   var share = (function(){
     var API = '/api/minio-file';
@@ -5156,7 +5224,7 @@ document.addEventListener('DOMContentLoaded', function() {
       oldUrls.forEach(function(u) { try { URL.revokeObjectURL(u); } catch(e) {} });
     }
     Promise.all([loadFontOrder(), loadFontCategories()]).then(function() {
-      client.storage.from(BUCKET).list(FONTS_FOLDER).then(function(result) {
+      fontStore.list().then(function(result) {
         if (result.error || !result.data || result.data.length === 0) {
           loadedFonts = [];
           renderFontPreviews();
@@ -5175,8 +5243,7 @@ document.addEventListener('DOMContentLoaded', function() {
         var newFonts = [];
         var remaining = fontFiles.length;
         fontFiles.forEach(function(f) {
-          var path = FONTS_FOLDER + '/' + f.name;
-          client.storage.from(BUCKET).download(path).then(function(dl) {
+          fontStore.download(f.name).then(function(dl) {
             remaining--;
             if (!dl.error && dl.data) {
               var blobUrl = URL.createObjectURL(dl.data);
@@ -5281,8 +5348,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   function uploadFont(file, callback) {
     adminStatus.textContent = 'Uploading ' + file.name + '...';
-    var path = FONTS_FOLDER + '/' + file.name;
-    client.storage.from(BUCKET).upload(path, file, { upsert: true }).then(function(result) {
+    fontStore.upload(file.name, file).then(function(result) {
       if (result.error) {
         adminStatus.textContent = 'Failed: ' + result.error.message;
         setTimeout(function() { adminStatus.textContent = ''; }, 2500);
@@ -5294,7 +5360,7 @@ document.addEventListener('DOMContentLoaded', function() {
   function renderAdminFontList() {
     // categories are needed to show each font's current assignment
     loadFontCategories().then(function() {
-    client.storage.from(BUCKET).list(FONTS_FOLDER).then(function(result) {
+    fontStore.list().then(function(result) {
       if (result.error || !result.data || result.data.length === 0) {
         adminFontList.innerHTML = '<div class="admin-empty">No fonts uploaded yet</div>';
         return;
@@ -5354,7 +5420,7 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.addEventListener('click', function() {
           var fontName = btn.dataset.name;
           if (!confirm('Remove "' + fontName + '"?')) return;
-          client.storage.from(BUCKET).remove([FONTS_FOLDER + '/' + fontName]).then(function(result) {
+          fontStore.remove([fontName]).then(function(result) {
             if (result.error) { alert('Could not remove font'); return; }
             fontOrder = fontOrder.filter(function(n) { return n !== fontName; });
             saveFontOrder().then(function() {
