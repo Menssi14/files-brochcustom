@@ -1522,14 +1522,26 @@
     if(!els.length) return;
     var keys = [];
     for(var i = 0; i &lt; els.length; i++) keys.push(els[i].getAttribute('data-nas-key'));
+    function gone(el){
+      if(!el || !el.parentNode || el.getAttribute('data-gone')) return;
+      var g=document.createElement('div');
+      g.className='nas-gone';
+      g.textContent='Image unavailable';
+      g.setAttribute('data-gone','1');
+      el.parentNode.replaceChild(g, el);
+    }
+    for(var q = 0; q &lt; els.length; q++){
+      (function(el){ el.addEventListener('error', function(){ gone(el); }); })(els[q]);
+    }
     nasLinks(keys).then(function(){
       for(var j = 0; j &lt; els.length; j++){
         var k = els[j].getAttribute('data-nas-key');
-        if(nasUrlCache[k]) els[j].src = nasUrlCache[k];
+        if(nasUrlCache[k]) els[j].src = nasUrlCache[k]; else gone(els[j]);
       }
     }).catch(function(e){
       try{ console.warn('Design images could not be loaded from storage', e); }catch(_){}
       toast('Design images unavailable \u2014 the NAS may be offline');
+      for(var m = 0; m &lt; els.length; m++) gone(els[m]);
     });
   }
 
@@ -2504,6 +2516,36 @@ function _dstNext(){
   .dst-foot{display:flex;gap:10px;justify-content:flex-end;padding:14px 20px 18px;border-top:1px solid rgba(31,77,62,.1);}
   .dst-btn{font-family:'Teko',sans-serif;text-transform:uppercase;letter-spacing:.08em;font-size:16px;padding:11px 20px;border-radius:999px;border:none;background:var(--forest,#1F4D3E);color:#F2EADD;cursor:pointer;}
   .dst-btn.ghost{background:none;border:1.5px solid var(--forest,#1F4D3E);color:var(--forest,#1F4D3E);}
+
+  .nas-gone{ display:flex; align-items:center; justify-content:center; text-align:center;
+    width:100%; height:100%; min-height:70px; padding:8px; font-size:13px; line-height:1.3;
+    color:rgba(31,77,62,.55); border:1px dashed rgba(31,77,62,.3); border-radius:8px;
+    background:repeating-linear-gradient(45deg, rgba(31,77,62,.05) 0 7px, rgba(31,77,62,.02) 7px 14px); }
+
+  /* ---- Desktop sizing -------------------------------------------------
+     The catalog only had a phone breakpoint, so on a wide screen the
+     category cards stayed at their 150px minimum and looked lost. These
+     rules sit last so they win over the base sizes. */
+  @media (min-width:900px){
+    main{ max-width:1240px; }
+    .cat-grid{ grid-template-columns:repeat(auto-fill,minmax(224px,1fr)); gap:18px; }
+    .cat-card{ min-height:176px; padding:24px 20px 20px; border-radius:16px; }
+    .cat-card .cat-name{ font-size:26px; }
+    .cat-card .cat-meta{ font-size:17px; }
+    .cat-card .leaf{ font-size:46px; top:16px; left:20px; }
+    .design-grid{ grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:18px; }
+    .tile .dname{ font-size:18px; }
+  }
+  @media (min-width:1400px){
+    main{ max-width:1440px; }
+    .cat-grid{ grid-template-columns:repeat(auto-fill,minmax(272px,1fr)); gap:22px; }
+    .cat-card{ min-height:212px; padding:28px 24px 22px; }
+    .cat-card .cat-name{ font-size:30px; }
+    .cat-card .cat-meta{ font-size:18px; }
+    .cat-card .leaf{ font-size:54px; }
+    .design-grid{ grid-template-columns:repeat(auto-fill,minmax(238px,1fr)); gap:20px; }
+    .tile .dname{ font-size:19px; }
+  }
 &lt;/style&gt;
 &lt;/body&gt;
 &lt;/html&gt;
